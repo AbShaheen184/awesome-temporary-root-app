@@ -407,6 +407,85 @@ init, holding the spray sockets) survives until reboot.
   PATH; the manager's first-run setup must be finished before shell root is usable.
 - TEST ALL (needs ≥2 candidates), the other ~95 loader branches, Stellar transport.
 
+## 6f. Payload bundling (this round)
+
+Four loaders had real `Runner` branches but no payloads in the APK, so they failed at
+the "missing file" check. Investigated all four against the cloned sources; two were
+portable, two are not.
+
+### Done — bundled and re-wired
+
+**Root My Pixel (29 target rows).** Its exploits are plain assets in
+`alex193a/Root-My-Pixel/app/src/main/assets/exploits/`, so all 29 `.so` files are now
+`app/src/main/assets/exploits/*.so` (3.5 MB). The run contract was wrong before: the
+`.so` is *not* exec'd directly. Upstream hands its bytes to a loader binary
+`libcve43499root.so` (in that app's `jniLibs`, now bundled too, 24 KB):
+
+```
+libcve43499root.so --run-payload <exploit.so> <helper> <log path>
+  env RMG_CLIENT_UID=2000  RMG_APP_UID=<caller uid>
+```
+
+Success is its wire line `RMP_PAYLOAD_RESULT:v1 … success=1 reason=OK`, or the legacy
+`RUN_END … done=1 root=1` (`PayloadResultParser` in the clone). `runRootMyPixel()` now
+matches that.
+
+**TimerRoot (31 of 58 rows).** The `timer` binary is *not* in the repo — it is a CI
+build product published at
+`https://github.com/MVN123123123123123/TimerRoot/releases/download/bingchiling/timer`
+(2.1 MB, ELF64 aarch64, verified by header). It is now bundled as
+`assets/timerroot/timer`, with 37 `conf/*.conf` profiles (all 31 rows that name one,
+plus the rest of the repo's profiles). Real CLI from the binary's own usage string:
+
+```
+timer --conf <conf> [--protocol N] [--samsung] [ids|leak|shell|fake|permissive] …
+  APP_PROTOCOL = 3   (p7a/timer_p7a.c)
+```
+
+`runTimerRoot()` stages the binary + profile and runs the generic `shell` stage.
+Success is `ROOT_SHELL_OK` or a `uid=0(root) … context=…` line. The process **parks**
+after success instead of exiting, so this branch waits for the marker
+(`execUntilMarker`) and keeps the process referenced rather than waiting on an exit
+code that never comes.
+
+**Staging had to change.** `stageAsset()` used one `echo` of the whole base64 blob.
+`MAX_ARG_STRLEN` is 128 KiB per argv entry, so the 2.1 MB `timer` and even a
+128 KB exploit `.so` could never stage. It now appends the base64 in 60 KB chunks and
+decodes once, and creates the destination's parent directory.
+
+### Not portable from the clones (verified, not guessed)
+
+- **GhostLock App (83 rows).** `libghostlock.so` does not exist in the repo: it is
+  compiled from `src/` (8,164 lines of C/C++, static libc++) by the project's own
+  Makefile and copied in by the Gradle task `prepareGhostlockJniLibs`. The profile is
+  also not the `.conf` file — the app encodes it to a GLK1 blob and pipes it on
+  **stdin** (`--ghostlock-app-call`), which needs an `OutputStream` on `PrivProcess`
+  and the profile serializer. Bundling `conf/` alone would not work.
+- **DirtyFrag (8 rows).** The `.ko` files in `app/src/main/jni/ko/` are prebuilt, but
+  `libdfroot.so` / `libbootstrap.so` are CMake products of `app/src/main/jni/*.c`, and
+  the run needs a Java IpSec harness (`ExploitRunner` builds an `IpSecTransform`, UDP
+  encap socket, SPI and random AES key, and passes `--encap-port/--sender-port/--spi/
+  --aes-key`). That is a port of a whole class, not an asset copy.
+
+### Index gaps found while counting
+
+- `shark`: 16 of 38 rows have `runner: null` → refused with "no runner in index".
+- `timerroot`: 27 of 58 rows have `runner: null` → same.
+- 96 of 109 loaders still have **zero** target rows, so they can never be offered.
+
+### Verified / not verified
+
+- **Verified:** `:app:assembleDebug` BUILD SUCCESSFUL; APK 21,369,263 bytes contains
+  `assets/exploits/` 29 files, `assets/timerroot/conf/` 37 files, `assets/timerroot/timer`,
+  `lib/arm64-v8a/libcve43499root.so`.
+- **Not verified:** neither new branch has been *run* on hardware — the test device
+  (vivo PD2408C, 6.6.127) matches neither a Root My Pixel (Pixel) nor a TimerRoot row,
+  so it cannot exercise them. Their markers come from the upstream sources, not from a
+  device run.
+- **Not wired:** Root My Pixel's second phase (using the exploit's own `su` path to
+  `ksud late-load`) and TimerRoot's KernelSU endgame. Both branches currently stop at
+  "temporary root reached"; KernelSU loading is still only implemented for Shark.
+
 ## 7. Next steps (pick up here)
 
 1. **Reboot, then run this exact build once** and confirm `LATE_LOAD_RC=0` via logcat:
@@ -424,12 +503,12 @@ init, holding the spray sockets) survives until reboot.
    falls through to `runGeneric()` and returns a clear "not wired yet" failure.
    Add one branch per loader, using the verified contracts in §4 and the
    `Target.runner` / `Target.extra` fields from the index.
-2. **Bundle the payloads.** Copy the arm64 payloads the loaders need from
-   `G:\Dev\AwesomRoot\<repo>` into `app/src/main/assets/` (or `jniLibs/` for
-   `.so`) — see §4's table for which repo ships what. Keep the app under a sane
-   size; the full set is ~2 GB, so prefer the per-loader subset or an on-demand
-   download. `Runner.stageAsset()` already pipes an asset through the transport
-   as base64.
+2. **Bundle the remaining payloads.** Done for Root My Pixel (29 `.so`) and
+   TimerRoot (`timer` + 37 confs) — see §6f. Still needed: GhostLock (`libghostlock.so`
+   must be compiled from `src/`, plus the GLK1 profile serializer) and DirtyFrag
+   (`libdfroot.so`/`libbootstrap.so` + the IpSec harness in `ExploitRunner`).
+   `Runner.stageAsset()` now chunks base64 in 60 KB appends, so large payloads stage
+   correctly.
 3. **Add the run button + manager picker to the UI.** `MainActivity` currently
    detects and ranks; the tap-to-run path is a stub by design.
 4. **Build the APK** with the invocation in §6b, then test on a real device.

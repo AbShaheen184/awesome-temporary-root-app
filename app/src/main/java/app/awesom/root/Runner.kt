@@ -39,16 +39,32 @@ class Runner(private val context: Context) {
     private fun stageAsset(transport: Transport, assetName: String, destName: String): String? {
         val bytes = runCatching { context.assets.open(assetName).use { it.readBytes() } }.getOrNull()
             ?: return null
+        val dest = "$workRoot/$destName"
+        val part = "$dest.b64"
+        val dir = dest.substringBeforeLast('/')
+        /*
+         * The bytes go through the transport as base64 in several appends:
+         * MAX_ARG_STRLEN is 128 KiB per argv entry, so the 2.1 MB `timer`
+         * binary and the per-device exploit .so files cannot go in one echo.
+         * The app's own uid cannot read /data/local/tmp back, so the staged
+         * path is returned as soon as the shell steps succeed.
+         */
         val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-        val tmp = "$workRoot/$destName.stage"
-        val sh = "mkdir -p $workRoot && echo $b64 | base64 -d > $tmp && chmod 755 $tmp && mv -f $tmp $workRoot/$destName"
+        for ((i, chunk) in b64.chunked(CHUNK).ifEmpty { listOf("") }.withIndex()) {
+            val op = if (i == 0) ">" else ">>"
+            if (!shOk(transport, "mkdir -p $dir && printf %s '$chunk' $op $part")) return null
+        }
+        return if (shOk(transport, "base64 -d $part > $dest && chmod 755 $dest && rm -f $part")) dest
+        else null
+    }
+
+    private fun shOk(transport: Transport, script: String): Boolean {
         val proc = transport.start(
-            listOf("/system/bin/sh", "-c", sh),
+            listOf("/system/bin/sh", "-c", script),
             listOf("PATH=/system/bin:/system/xbin", "HOME=/"), "/"
-        ) ?: return null
-        proc.stdout.bufferedReader().readText()
-        proc.waitFor()
-        return if (File(workRoot, destName).exists()) "$workRoot/$destName" else null
+        ) ?: return false
+        runCatching { proc.stdout.bufferedReader().readText() }
+        return proc.waitFor() == 0
     }
 
     /**
@@ -68,7 +84,7 @@ class Runner(private val context: Context) {
         if (kmi == null) {
             return RunResult.Failure(-1, "cannot derive KMI from '${profile.kernelRelease}'")
         }
-        if (!context.packageManagerHas(managerPkg)) {
+        if (managerPkg.isNotBlank() && !context.packageManagerHas(managerPkg)) {
             return RunResult.NeedsManager(managerPkg)
         }
 
@@ -206,38 +222,91 @@ class Runner(private val context: Context) {
                 (release.contains("gdd6fd5c98918") || release.contains("g690108013dcc")))
 
     /**
-     * TimerRoot: the exploit binary is staged at `/data/local/tmp/timer` and the
-     * profile is a HOCON `conf/<release>.conf` selected by `uname -r` + page size.
+     * TimerRoot: the exploit is the `timer` binary plus a HOCON
+     * `conf/<release>.conf` profile. Its own CLI is
+     *
+     *     timer --conf <conf> [--protocol N] [--samsung] [shell|fake|…]
+     *
+     * and the app talks to it at protocol 3 (`APP_PROTOCOL` in
+     * `p7a/timer_p7a.c`). The generic stage is `shell`; success is the binary
+     * printing `ROOT_SHELL_OK` or a `uid=0(root) … context=…` line. It parks
+     * after success instead of exiting, exactly like upstream, which is why
+     * this branch waits for the marker instead of for the process to end.
      */
     private fun runTimerRoot(
         loader: Loader, target: Target, p: DeviceProfile, transport: Transport,
         managerPkg: String, kmi: String, onLine: (LogLine) -> Unit,
     ): RunResult {
-        val conf = target.runner ?: return RunResult.Failure(-1, "no profile in index")
+        val confName = target.runner ?: return RunResult.Failure(-1, "no profile in index")
+        val base = confName.substringAfterLast('/')
+        val confAsset = "timerroot/conf/$base"
+        val samsung = runCatching {
+            context.assets.open(confAsset).bufferedReader().use { it.readText() }
+        }.getOrNull()?.let { SAMSUNG_MODE.containsMatchIn(it) } == true
+        if (samsung) {
+            return RunResult.Failure(
+                -1,
+                "'$base' is a Samsung profile: it needs the diabl0w/KernelSU Samsung " +
+                    "build and the --samsung chain, which is not wired yet."
+            )
+        }
+        val conf = stageAsset(transport, confAsset, "conf/$base")
+            ?: return RunResult.Failure(-1, "missing $confAsset in the APK assets")
+        val bin = stageAsset(transport, "timerroot/timer", "timer")
+            ?: return RunResult.Failure(-1, "missing timerroot/timer in the APK assets")
         val env = listOf(
-            "PATH=/system/bin:/system/xbin:/data/adb/ksu/bin", "HOME=/",
-            "TIMER_KMI=$kmi", "TIMER_MANAGER=$managerPkg",
+            "PATH=/system/bin:/system/xbin:/data/adb/ksu/bin", "HOME=/", "TIMER_KMI=$kmi",
         )
-        val cmd = "/data/local/tmp/timer $conf"
-        return exec("/system/bin/sh", listOf("-c", cmd), env, workRoot, transport, onLine,
-            successMarker = "KSU_LOADED")
+        onLine(LogLine("runner  timer  conf=$base  kmi=$kmi", LogLine.Kind.STEP))
+        return execUntilMarker(
+            "/system/bin/sh",
+            listOf("-c", "$bin --conf $conf --protocol $TIMER_PROTOCOL shell 2>&1"),
+            env, workRoot, transport, onLine,
+            markers = listOf("ROOT_SHELL_OK", "uid=0(root)"),
+            timeoutMs = TIMER_TIMEOUT_MS,
+        )
     }
 
-    /** Root My Pixel: per-build `.so` from assets + `ksud late-load --kmi`. */
+    /**
+     * Root My Pixel: the per-build `exploits/<codename>-<build>.so` is not
+     * exec'd directly. Upstream hands its bytes to a small loader binary
+     * (`libcve43499root.so`, shipped in that app's jniLibs) which re-execs the
+     * payload:
+     *
+     *     libcve43499root.so --run-payload <exploit.so> <helper> <log path>
+     *
+     * with `RMG_CLIENT_UID` (the uid running it, 2000 through the transport)
+     * and `RMG_APP_UID` (the caller's uid) in the environment. Success is its
+     * wire result line: `RMP_PAYLOAD_RESULT:v1 … success=1 reason=OK`, or the
+     * legacy `RUN_END … done=1 root=1`.
+     */
     private fun runRootMyPixel(
         loader: Loader, target: Target, p: DeviceProfile, transport: Transport,
         managerPkg: String, kmi: String, onLine: (LogLine) -> Unit,
     ): RunResult {
         val asset = target.runner ?: return RunResult.Failure(-1, "no exploit asset in index")
-        val staged = stageAsset(transport, asset, "rmp-" + asset.substringAfterLast('/'))
-            ?: File(context.applicationInfo.nativeLibraryDir, asset.substringAfterLast('/'))
-                .takeIf { it.isFile }?.absolutePath
-            ?: return RunResult.Failure(-1, "missing $asset")
+        val helper = File(context.applicationInfo.nativeLibraryDir, "libcve43499root.so")
+        if (!helper.isFile) {
+            return RunResult.Failure(
+                -1,
+                "libcve43499root.so is not bundled in this APK. Available: " +
+                    nativeDirList(context.applicationInfo.nativeLibraryDir)
+            )
+        }
+        val exploit = stageAsset(transport, asset, "rmp-exploit.so")
+            ?: return RunResult.Failure(-1, "missing $asset in the APK assets")
         val env = listOf(
-            "PATH=/system/bin:/system/xbin:/data/adb/ksu/bin", "HOME=/", "RMY_KMI=$kmi",
+            "PATH=/system/bin:/system/xbin:/data/adb/ksu/bin", "HOME=/",
+            "RMG_CLIENT_UID=2000", "RMG_APP_UID=${context.applicationInfo.uid}",
         )
-        return exec(staged, emptyList(), env, workRoot, transport, onLine,
-            successMarker = "ROOT_OK")
+        onLine(LogLine("runner  ${asset.substringAfterLast('/')}  kmi=$kmi", LogLine.Kind.STEP))
+        return exec(
+            helper.absolutePath,
+            listOf("--run-payload", exploit, helper.absolutePath, "$workRoot/rmp-exploit.log"),
+            env, workRoot, transport, onLine,
+            successMarker = "RMP_PAYLOAD_RESULT:v1",
+            aliasMarkers = listOf("success=1", "root=1"),
+        )
     }
 
     /** GhostLock family: native binary + a HOCON profile keyed on `uname -r`. */
@@ -294,6 +363,7 @@ class Runner(private val context: Context) {
         transport: Transport,
         onLine: (LogLine) -> Unit,
         successMarker: String,
+        aliasMarkers: List<String> = emptyList(),
     ): RunResult {
         // The transport passes `dir` as the child's cwd; a missing directory
         // makes the start fail outright, and /data/local/tmp is not writable by
@@ -304,16 +374,19 @@ class Runner(private val context: Context) {
         val proc = transport.start(cmd, env, dir)
             ?: return RunResult.NeedsTransport("transport refused to start ${cmd.first()}")
         val code = stream(proc, onLine)
-        val ok = markerPresent(successMarker, onLine)
-        return if (code == 0 && ok) RunResult.Success(code, successMarker)
+        val hit = (listOf(successMarker) + aliasMarkers).firstOrNull { markerPresent(it, onLine) }
+        return if (code == 0 && hit != null) RunResult.Success(code, hit)
         else RunResult.Failure(
             code,
-            "exit=$code marker='$successMarker' present=$ok" +
+            "exit=$code marker='$successMarker' present=${hit != null}" +
                 if (captured.containsKey("LATE_LOAD_SKIP"))
                     " — the runner skipped the late-load (env-missing)"
                 else ""
         )
     }
+
+    /** Holds parked runner processes (Shizuku/Process handles) so they stay alive. */
+    private val liveShells = mutableListOf<PrivProcess>()
 
     private var workDirReady = false
 
@@ -336,15 +409,59 @@ class Runner(private val context: Context) {
     private val captured = mutableMapOf<String, Boolean>()
 
     private fun stream(proc: PrivProcess, onLine: (LogLine) -> Unit): Int {
-        val seen = mutableSetOf<String>()
-        val t = Thread {
+        val t = pump(proc, onLine)
+        val code = proc.waitFor()
+        runCatching { t.join(3000) }
+        return code
+    }
+
+    /**
+     * Starts [bin] and returns as soon as one of [markers] appears in its
+     * output. Used for runners that park after success (`timer shell`) instead
+     * of exiting: waiting for the exit code would hang the run for minutes.
+     * The live process is kept referenced so its Shizuku descriptors stay open.
+     */
+    private fun execUntilMarker(
+        bin: String,
+        args: List<String>,
+        env: List<String>,
+        dir: String,
+        transport: Transport,
+        onLine: (LogLine) -> Unit,
+        markers: List<String>,
+        timeoutMs: Long,
+    ): RunResult {
+        ensureWorkDir(dir, transport)
+        captured.clear()
+        val proc = transport.start(listOf(bin) + args, env, dir)
+            ?: return RunResult.NeedsTransport("transport refused to start $bin")
+        pump(proc, onLine)
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            markers.firstOrNull { captured.containsKey(it) }?.let {
+                synchronized(liveShells) { liveShells += proc }
+                onLine(LogLine(
+                    "root shell left running (kill or reboot to clean up); marker=$it",
+                    LogLine.Kind.OK
+                ))
+                return RunResult.Success(0, it)
+            }
+            Thread.sleep(200)
+        }
+        runCatching { proc.destroy() }
+        return RunResult.Failure(-1, "no ${markers.joinToString("/")} within ${timeoutMs / 1000}s")
+    }
+
+    private fun pump(proc: PrivProcess, onLine: (LogLine) -> Unit): Thread {
+        val out = Thread {
             runCatching {
                 proc.stdout.bufferedReader().forEachLine { raw ->
                     val kind = when {
                         raw.contains("FAIL") || raw.startsWith("ERROR") -> LogLine.Kind.FAIL
                         raw.contains("SKIP=") || raw.contains("KSUD_MISSING") ||
                             Regex("""LATE_LOAD_RC=[1-9]""").containsMatchIn(raw) -> LogLine.Kind.FAIL
-                        raw.contains("LATE_LOAD_RC=0") || raw.contains("KSU_LOADED") -> LogLine.Kind.OK
+                        raw.contains("LATE_LOAD_RC=0") || raw.contains("KSU_LOADED") ||
+                            raw.contains("ROOT_SHELL_OK") || raw.contains("uid=0(root)") -> LogLine.Kind.OK
                         raw.startsWith("<s>") || raw.startsWith("<b>") -> LogLine.Kind.STEP
                         else -> LogLine.Kind.OUT
                     }
@@ -354,12 +471,12 @@ class Runner(private val context: Context) {
                 }
             }
         }.apply { isDaemon = true; start() }
-        runCatching {
-            proc.stderr.bufferedReader().forEachLine { onLine(LogLine(it, LogLine.Kind.ERR)) }
-        }
-        val code = proc.waitFor()
-        runCatching { t.join(3000) }
-        return code
+        Thread {
+            runCatching {
+                proc.stderr.bufferedReader().forEachLine { onLine(LogLine(it, LogLine.Kind.ERR)) }
+            }
+        }.apply { isDaemon = true; start() }
+        return out
     }
 
     companion object {
@@ -367,7 +484,20 @@ class Runner(private val context: Context) {
         val MARKERS = listOf(
             "LATE_LOAD_RC=0", "KSU_LOADED", "ROOT_OK", "GHOSTLOCK_OK",
             "DF_ROOT_OK", "PLANT_CRED_OK", "MODULE_STATE=Live",
+            "ROOT_SHELL_OK", "uid=0(root)", "success=1", "root=1",
+            "RMP_PAYLOAD_RESULT:v1",
         )
+
+        /** `MAX_ARG_STRLEN` is 128 KiB; keep each staged base64 append well under it. */
+        private const val CHUNK = 60_000
+
+        /** `APP_PROTOCOL` from TimerRoot's `p7a/timer_p7a.c`. */
+        private const val TIMER_PROTOCOL = 3
+
+        /** The generic `shell` stage runs up to three plant attempts. */
+        private const val TIMER_TIMEOUT_MS = 420_000L
+
+        private val SAMSUNG_MODE = Regex("""(?m)^\s*samsung_mode\s*=\s*1\s*$""")
 
         /** Engines that can late-load the universal ksud payload.
          *  Mirrors `JailbreakCore.supportsUniversal()`. */

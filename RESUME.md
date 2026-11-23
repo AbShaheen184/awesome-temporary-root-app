@@ -44,6 +44,12 @@ candidate list (one hit: **Shark**, `CVE-2026-98260`), Shizuku transport live as
 `/proc/modules` showed `kernelsu … Live` and `/data/adb` appeared root-owned. See
 `HANDOFF.md` §6e for the evidence and the eight bugs fixed to get there.
 
+Root My Pixel (29 exploits + its loader `libcve43499root.so`) and TimerRoot (`timer`
+binary + 37 kernel confs) are now bundled and wired against their upstream contracts
+(`HANDOFF.md` §6f) — compiled, not yet run on hardware. GhostLock and DirtyFrag cannot
+be bundled from the clones: their binaries are build products, and DirtyFrag also needs
+the IpSec harness ported.
+
 ## The one thing to do next
 
 **One cold-boot run of this exact build.** Root is per-boot, and the successful run
