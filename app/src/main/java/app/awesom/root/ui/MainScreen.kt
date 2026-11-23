@@ -41,6 +41,8 @@ class MainScreen(
     private var managerRow: LinearLayout
     private val candidateList: LinearLayout
     private val logView: TextView
+    private val logBox: LinearLayout
+    private var logScroll: ScrollView
     private var statusDot: TextView = TextView(context)
     private val runButtons: LinearLayout
 
@@ -78,14 +80,43 @@ class MainScreen(
             textSize = 11f
             setTextColor(color("text"))
             background = context.getDrawable(logBg())
-            setPadding(dp(12), dp(12), dp(12), dp(12))
+            setPadding(dp(12), dp(12), dp(12), dp(24))
             setTextIsSelectable(true)
             text = "ready.\n"
         }
-        val scroll = ScrollView(context).apply { addView(logView) }
-        addView(scroll, LayoutParams(MATCH_PARENT, dp(220)).apply { topMargin = dp(8) })
 
-        renderTransportRow()
+        // The log grows with its content (up to 45% of the viewport) inside an
+        // inline area; the whole page scrolls, so the tail can never be clipped
+        // by a fixed-height box or by the bottom of the screen.
+        logBox = LinearLayout(context).apply {
+            orientation = VERTICAL
+            background = context.getDrawable(logBg())
+            setPadding(dp(12), dp(12), dp(12), dp(16))
+            addView(
+                logView,
+                LayoutParams(MATCH_PARENT, WRAP)
+            )
+        }
+        // The log grows with its content, then caps at 45% of the viewport and
+        // scrolls inside itself. The whole page also scrolls, so the tail can
+        // never be clipped by a fixed height or by the bottom of the screen.
+        logScroll = ScrollView(context).apply {
+            addView(logBox)
+        }
+        addView(
+            logScroll,
+            LayoutParams(MATCH_PARENT, WRAP).apply { topMargin = dp(8) }
+        )
+        val maxH = (resources.displayMetrics.heightPixels * 0.45f).toInt()
+        logBox.viewTreeObserver.addOnGlobalLayoutListener(
+            object : android.view.ViewTreeObserver.OnGlobalLayoutListener {
+                override fun onGlobalLayout() {
+                    if (logBox.height > maxH && logScroll.layoutParams.height != maxH) {
+                        logScroll.layoutParams = logScroll.layoutParams.apply { height = maxH }
+                    }
+                }
+            }
+        )
         renderManagerRow()
         renderButtons()
     }
@@ -127,6 +158,8 @@ class MainScreen(
             sp.setSpan(android.text.style.ForegroundColorSpan(c), start, s.length, 0)
             logView.text = sp
         }
+        // Auto-scroll the capped box to the newest line.
+        logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
     }
 
     // ------------------------------------------------------------------ renderers
