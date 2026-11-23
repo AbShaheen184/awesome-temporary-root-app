@@ -148,13 +148,42 @@ object IndexStore {
     }
 
     /**
+     * Candidates that are an **exact** match on a key the loader actually names
+     * (kernel release, or KMI, or model). Upstream refuses to run without one of
+     * these, so nothing else is offered.
+     */
+    fun exactCandidates(p: DeviceProfile, runnableOnly: Boolean = true): List<Pair<Loader, Target>> {
+        val key = p.matchKey
+        val kmi = kmiFor(p.kernelRelease)
+        val out = mutableListOf<Pair<Loader, Target>>()
+        for (t in targets) {
+            val l = loader(t.loader) ?: continue
+            if (runnableOnly && !l.runnable) continue
+            val exactKernel = t.kernel != null && t.kernel == key
+            val modelHit = t.devices.any {
+                it.equals(p.model, true) || it.equals(p.device, true)
+            }
+            if (!exactKernel && !modelHit) continue
+            out += l to t
+        }
+        return out.sortedByDescending { (_, t) ->
+            val s = t.score(p)
+            if (t.kernel == key) s + 1000 else s
+        }
+    }
+
+    /**
      * Derives the Kernel Module Interface (`android15-6.6`) from a full
      * `uname -r`, which is what every loader's `ksud late-load --kmi` needs.
+     *
+     * Upstream's own profiles write exactly this shape
+     * (`ksu_kmi = "android15-6.6"` for `6.6.118-android15-8-g...`), so the
+     * kernel version is truncated to major.minor — never major.minor.patch.
      */
     fun kmiFor(release: String): String? {
         if (release.isBlank()) return null
-        val m = Regex("""^(\d+\.\d+(?:\.\d+)?)-android(\d+)-(\d+)""").find(release) ?: return null
-        val (kernel, android, gki) = m.destructured
+        val m = Regex("""^(\d+\.\d+)(?:\.\d+)?-android(\d+)-\d+""").find(release) ?: return null
+        val (kernel, android) = m.destructured
         return "android$android-$kernel"
     }
 

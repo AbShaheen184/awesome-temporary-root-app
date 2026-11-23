@@ -79,6 +79,26 @@ class TransportSelector(private val context: Context) {
         return rc to (out + err)
     }
 
+    /**
+     * The no-transport path. Loaders that DirtyFrag runs in-process (it opens the
+     * IpSec socket from the app itself and only needs the manager's `libksud.so`)
+     * can be attempted as the app's own uid; this returns the raw result so the
+     * UI can say plainly whether it worked or was refused.
+     */
+    fun shellDirect(script: String): Pair<Int, String> {
+        val p = runCatching {
+            val pb = ProcessBuilder("/system/bin/sh", "-c", script)
+            pb.redirectErrorStream(true)
+            pb.start()
+        }.getOrNull() ?: return -1 to "cannot exec sh"
+        val out = runCatching { p.inputStream.bufferedReader().readText() }.getOrDefault("")
+        val rc = runCatching { p.waitFor() }.getOrDefault(-1)
+        return rc to out
+    }
+
+    /** True when a privileged transport exists; false means direct-run only. */
+    fun privileged(): Boolean = pick() != null
+
     companion object {
         /** KernelSU-family packages, most common first. */
         val MANAGER_PACKAGES = listOf(

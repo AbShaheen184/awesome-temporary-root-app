@@ -33,6 +33,11 @@
             </intent-filter>
         </activity>
 
+        <!-- Temporary: reports the real Shizuku binder/permission state. -->
+        <activity
+            android:name=".DiagActivity"
+            android:exported="true" />
+
         <!-- Shizuku binder provider: the privileged transport most loaders use. -->
         <provider
             android:name="rikka.shizuku.ShizukuProvider"

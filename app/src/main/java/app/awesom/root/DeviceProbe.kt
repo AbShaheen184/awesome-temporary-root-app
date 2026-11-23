@@ -9,6 +9,10 @@ import java.io.File
  * Reads the device facts. Cheap fields come from [Build]; everything that needs
  * the shell (kernel banner, page size, SELinux, root state) is read through the
  * [Transport] and only when one is available.
+ *
+ * The kernel release is the one field the whole matching rule depends on, so
+ * if the transport read comes back empty it is retried as a plain local exec —
+ * an unreadable `uname -r` makes every candidate list meaningless.
  */
 object DeviceProbe {
 
@@ -35,7 +39,8 @@ object DeviceProbe {
     fun withShell(base: DeviceProfile, transport: Transport?): DeviceProfile {
         if (transport == null) return base
         val proc = ShellReader(transport)
-        val release = proc.first("uname -r")?.trim().orEmpty()
+        var release = proc.first("uname -r")?.trim().orEmpty()
+        if (release.isBlank()) release = readKernelDirect()
         val banner = proc.first("cat /proc/version")?.trim().orEmpty()
         val page = proc.first("getconf PAGESIZE")?.trim()?.toIntOrNull() ?: 4096
         val se = proc.first("getenforce")?.trim().orEmpty()
@@ -51,6 +56,18 @@ object DeviceProbe {
             rootActive = rooted,
         )
     }
+
+    /**
+     * `uname -r` with no privilege at all. An app can exec /system/bin/uname
+     * for itself, which covers the case where Shizuku answers but its
+     * newProcess call is refused.
+     */
+    private fun readKernelDirect(): String = runCatching {
+        val p = ProcessBuilder("/system/bin/uname", "-r").redirectErrorStream(true).start()
+        val out = p.inputStream.bufferedReader().readText().trim()
+        p.waitFor()
+        out
+    }.getOrDefault("")
 
     private fun prop(key: String): String = runCatching {
         val p = ProcessBuilder("/system/bin/getprop", key).redirectErrorStream(true).start()
