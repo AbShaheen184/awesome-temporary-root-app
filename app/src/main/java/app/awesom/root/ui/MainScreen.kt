@@ -41,7 +41,6 @@ class MainScreen(
     private var managerRow: LinearLayout
     private val candidateList: LinearLayout
     private val logView: TextView
-    private val logBox: LinearLayout
     private var logScroll: ScrollView
     private var statusDot: TextView = TextView(context)
     private val runButtons: LinearLayout
@@ -60,7 +59,7 @@ class MainScreen(
     init {
         orientation = VERTICAL
         setBackgroundColor(color("bg"))
-        setPadding(dp(16), dp(24), dp(16), dp(24))
+        setPadding(dp(16), dp(16), dp(16), dp(16))
 
         addView(titleRow())
         addView(statusCard())
@@ -79,43 +78,23 @@ class MainScreen(
             typeface = Typeface.MONOSPACE
             textSize = 11f
             setTextColor(color("text"))
-            background = context.getDrawable(logBg())
-            setPadding(dp(12), dp(12), dp(12), dp(24))
+            setPadding(dp(12), dp(12), dp(12), dp(12))
             setTextIsSelectable(true)
             text = "ready.\n"
         }
 
-        // The log grows with its content (up to 45% of the viewport) inside an
-        // inline area; the whole page scrolls, so the tail can never be clipped
-        // by a fixed-height box or by the bottom of the screen.
-        logBox = LinearLayout(context).apply {
-            orientation = VERTICAL
-            background = context.getDrawable(logBg())
-            setPadding(dp(12), dp(12), dp(12), dp(16))
-            addView(
-                logView,
-                LayoutParams(MATCH_PARENT, WRAP)
-            )
-        }
-        // The log grows with its content, then caps at 45% of the viewport and
-        // scrolls inside itself. The whole page also scrolls, so the tail can
-        // never be clipped by a fixed height or by the bottom of the screen.
+        // One page, and the log is the only thing that scrolls: it takes the
+        // height the fixed cards above leave over (weight 1, height 0) and
+        // scrolls inside itself. A swipe on the text moves the text, not the
+        // whole page, and the newest line is always pinned into view.
         logScroll = ScrollView(context).apply {
-            addView(logBox)
+            background = context.getDrawable(logBg())
+            isVerticalScrollBarEnabled = true
+            addView(logView, LayoutParams(MATCH_PARENT, WRAP))
         }
         addView(
             logScroll,
-            LayoutParams(MATCH_PARENT, WRAP).apply { topMargin = dp(8) }
-        )
-        val maxH = (resources.displayMetrics.heightPixels * 0.45f).toInt()
-        logBox.viewTreeObserver.addOnGlobalLayoutListener(
-            object : android.view.ViewTreeObserver.OnGlobalLayoutListener {
-                override fun onGlobalLayout() {
-                    if (logBox.height > maxH && logScroll.layoutParams.height != maxH) {
-                        logScroll.layoutParams = logScroll.layoutParams.apply { height = maxH }
-                    }
-                }
-            }
+            LayoutParams(MATCH_PARENT, 0).apply { weight = 1f; topMargin = dp(8) }
         )
         renderManagerRow()
         renderButtons()
@@ -177,7 +156,10 @@ class MainScreen(
         val p = profile
         deviceCard.addView(big(p.marketName.ifBlank { p.model }))
         deviceCard.addView(sub("model ${p.model}  ·  codename ${p.device}"))
-        deviceCard.addView(gap())
+        // Explicit height: a plain View added with default params inside a
+        // vertical LinearLayout was measured against the leftover space and
+        // swallowed the whole card (1535 px) on the OnePlus.
+        deviceCard.addView(View(context), LinearLayout.LayoutParams(MATCH_PARENT, dp(6)))
         deviceCard.addView(kv("Kernel (uname -r)", p.kernelRelease.ifBlank { "unknown" }))
         deviceCard.addView(kv("KMI", IndexStore.kmiFor(p.kernelRelease) ?: "—"))
         deviceCard.addView(kv("Page size", "${p.pageSize} B"))
@@ -286,7 +268,7 @@ class MainScreen(
         val t = TextView(context).apply {
             text = "AwesomRoot"
             setTextColor(color("text"))
-            textSize = 22f
+            textSize = 20f
             setTypeface(typeface, Typeface.BOLD)
         }
         row.addView(t, 0, LayoutParams(0, WRAP, 1f))
@@ -302,11 +284,12 @@ class MainScreen(
     private fun statusCard(): View {
         val c = card()
         c.orientation = HORIZONTAL
+        // One line: this card used to be a two-line paragraph and cost ~100 dp
+        // that the log needs on a 1080x2412 screen.
         c.addView(TextView(context).apply {
-            text = "Temporary root on a locked bootloader, one boot at a time.\n" +
-                "Match is on the exact kernel release — never a near match."
+            text = "Temporary root, one boot at a time. Exact kernel match only."
             setTextColor(color("text_dim"))
-            textSize = 12f
+            textSize = 11f
         }, 0, LayoutParams(0, WRAP, 1f))
         return c
     }
@@ -325,9 +308,9 @@ class MainScreen(
     private fun label(s: String) = TextView(context).apply {
         text = s
         setTextColor(color("text_dim"))
-        textSize = 11f
+        textSize = 10f
         letterSpacing = 0.12f
-        setPadding(0, dp(10), 0, dp(4))
+        setPadding(0, dp(8), 0, dp(2))
     }
 
     private fun big(s: String) = TextView(context).apply {
@@ -349,12 +332,12 @@ class MainScreen(
         row.addView(TextView(context).apply {
             text = k
             setTextColor(color("text_dim"))
-            textSize = 12f
+            textSize = 11f
         }, 0, LayoutParams(0, WRAP, 1f))
         row.addView(TextView(context).apply {
             text = v
             setTextColor(color("text"))
-            textSize = 12f
+            textSize = 11f
             setTypeface(typeface, Typeface.BOLD)
             gravity = Gravity.END
         }, LayoutParams(0, WRAP, 1f))
@@ -374,6 +357,8 @@ class MainScreen(
             this.text = text
             isAllCaps = false
             textSize = 13f
+            minHeight = dp(42)
+            minimumHeight = dp(42)
             setTextColor(color(if (primary) "bg" else "text"))
             background = context.getDrawable(if (primary) btnPrimary() else btnSecondary())
             isEnabled = enabled
@@ -428,17 +413,13 @@ class MainScreen(
     enum class LogLineKind { OUT, OK, FAIL, STEP }
 
     /**
-     * Wraps this screen in a ScrollView so the whole page scrolls. The screen
-     * itself is a vertical LinearLayout, which does nothing on its own when the
-     * content is taller than the viewport.
+     * The screen fills the window itself — there is deliberately no outer
+     * ScrollView, so the page cannot scroll and the log is the only scroller.
+     * The fixed cards are measured at their natural height and the log takes
+     * whatever is left (`weight = 1`).
      */
     companion object {
         private const val MATCH_PARENT = ViewGroup.LayoutParams.MATCH_PARENT
         private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
-
-        fun scrolled(screen: MainScreen): ScrollView = ScrollView(screen.context).apply {
-            isFillViewport = true
-            addView(screen)
-        }
     }
 }

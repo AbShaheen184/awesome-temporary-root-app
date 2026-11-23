@@ -539,6 +539,33 @@ whole base64 string in memory.
   has not run on hardware, and the raw URLs only answer once `payloads/` is pushed
   and the repo is public.
 
+## 6h. Single-page layout + universal-ksud fix (2026-11-23, later)
+
+- The screen no longer sits in an outer `ScrollView`: the page is fixed and the
+  **log is the only scroller** — its own `ScrollView`, `weight = 1`, pinned to the
+  newest line. On the 1080×2412 test phone that is a 501 px box.
+- Why the header changed: the log used to grow inside a page scroller, so dragging
+  the text moved the whole page. Dropping the outer `ScrollView` alone clipped the
+  log to 0 px, because the fixed content measured 2141 of 2268 px. The header is
+  now compact (one-line intro, 10 sp section labels, 11 sp key/value rows, 42 dp
+  buttons, 16 dp window padding) which leaves the log 501 px and needs no page
+  scrolling at all.
+- Bug found on the way: `gap()` — a plain `View` added with default params inside
+  the vertical device card — was measured against the leftover space and grew to
+  **1535 px**, pushing every later view (candidates, buttons, log) to 0 height. It
+  now has an explicit `dp(6)` height.
+- `PYB110_UNIVERSAL` compared the *manager* name against the CVE engine ids in
+  `UNIVERSAL_KINDS`, so it was always 0 and `libksud_universal.so` was never used.
+  It now uses the engine (`JailbreakCore.supportsUniversal(exploit.kind)`), and the
+  12 MiB payload is downloaded/staged only when the engine needs it.
+- **Verified:** build passes; installed on the OnePlus 9 Pro (LE2123,
+  `5.4.254-qgqi-gacce45beef5d`): exactly one `ScrollView` in the hierarchy (the log,
+  [48,1815]–[1032,2316]), tapping REFRESH 6× leaves its bounds unchanged, and a
+  drag inside it scrolls the text while the header stays put.
+- **Not verified:** the universal path — it needs an engine in `UNIVERSAL_KINDS`,
+  and no loader matches this phone; and no run was made on the iQOO after this UI
+  change.
+
 ## 7. Next steps (pick up here)
 
 1. **Reboot, then run this exact build once** and confirm `LATE_LOAD_RC=0` via logcat:

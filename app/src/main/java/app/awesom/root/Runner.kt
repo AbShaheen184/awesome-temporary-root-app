@@ -160,7 +160,11 @@ class Runner(private val context: Context) {
                 "cannot get payloads/$lib (not cached and the download failed)"
             )
         val kind = managerRuntime(managerPkg)
-        val universal = kind in UNIVERSAL_KINDS
+        // Upstream gates this on the *engine* (`JailbreakCore.supportsUniversal(exploit.kind)`),
+        // not on the manager: the universal payload is a per-engine property. Comparing the
+        // manager name here meant PYB110_UNIVERSAL was always 0 and libksud_universal.so was
+        // never used.
+        val universal = UNIVERSAL_KINDS.any { it.equals(engine, true) }
         val universalKsud = if (universal) {
             stageAsset(transport, "libksud_universal.so", "libksud_universal.so", onLine)
                 ?: return RunResult.Failure(

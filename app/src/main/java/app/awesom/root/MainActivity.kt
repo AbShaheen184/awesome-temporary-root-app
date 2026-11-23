@@ -31,7 +31,8 @@ class MainActivity : ComponentActivity(), MainScreen.Callbacks {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         screen = MainScreen(this, this)
-        setContentView(MainScreen.scrolled(screen))
+        // No outer ScrollView: the page is fixed and only the log scrolls.
+        setContentView(screen)
 
         Shizuku.addRequestPermissionResultListener { _, _ -> triggerRefresh() }
         Shizuku.addBinderReceivedListenerSticky { triggerRefresh() }
