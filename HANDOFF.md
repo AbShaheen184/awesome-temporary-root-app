@@ -486,6 +486,59 @@ decodes once, and creates the destination's parent directory.
   `ksud late-load`) and TimerRoot's KernelSU endgame. Both branches currently stop at
   "temporary root reached"; KernelSU loading is still only implemented for Shark.
 
+## 6g. Payloads moved out of the APK (2026-11-23, later)
+
+The APK carried 23 MB of exploit payloads that only a handful of devices can use.
+All 44 executables now live in `payloads/` at the repo root, and the app downloads
+the one it needs the first time a loader runs.
+
+### What moved (44 files, 22.82 MiB)
+
+| was | now | count | size |
+|---|---|---|---|
+| `app/src/main/jniLibs/arm64-v8a/libk*.so` | `payloads/libk*.so` | 12 | 5.32 MiB |
+| `app/src/main/jniLibs/arm64-v8a/libksud_universal.so` | `payloads/libksud_universal.so` | 1 | 12.06 MiB |
+| `app/src/main/jniLibs/arm64-v8a/libcve43499root.so` | `payloads/libcve43499root.so` | 1 | 23 KiB |
+| `app/src/main/assets/exploits/*.so` | `payloads/<codename>-<build>.so` | 29 | 3.47 MiB |
+| `app/src/main/assets/timerroot/timer` | `payloads/timer` | 1 | 2.04 MiB |
+
+`payloads/manifest.json` lists every file with its size and SHA-256 and
+`payloads/README.md` is the hosting index. The 37 TimerRoot `.conf` profiles and
+`loaders.json` stay in `assets/` — ~380 KiB, and the app reads them directly.
+The old `app/src/main/jniLibs/` tree no longer exists.
+
+### How the app gets them (`PayloadStore.kt`)
+
+- Base URL is one constant:
+  `https://raw.githubusercontent.com/AbShaheen184/awesome-temporary-root-app/master/payloads`.
+  **The repo has to be public** — a private repo answers 404 to the raw host.
+- Lookup order: `filesDir/payloads/<name>` cache → bundled asset → HTTP GET → write
+  `<name>.part` then rename. The byte count is checked against `Content-Length`; a
+  mismatch is reported and nothing is cached.
+- Every failure is a log line in the run pane (`HTTP 404`, timeout, truncated).
+
+### Why nothing is exec'd straight from the cache
+
+`targetSdk = 36`, and since API 29 an app cannot `execve()` a file inside its own
+home directory (W^X / `execute_no_trans`). So `Runner.stageAsset()` streams the
+payload through the transport into `/data/local/tmp/awesomroot/` (0700,
+shell-writable) and every loader is executed from there. That is also why the Shark
+runner and the Root My Pixel helper are staged now instead of read out of
+`nativeLibraryDir`.
+
+`stageAsset()` base64-encodes 45,000-byte slices (a multiple of 3 → exactly 60,000
+chars, under `MAX_ARG_STRLEN`), so even the 12 MiB ksud payload never needs its
+whole base64 string in memory.
+
+### Verified / not verified
+
+- **Verified:** `:app:assembleDebug` BUILD SUCCESSFUL; the APK is now
+  **6,346,476 bytes** (was 21,369,263) and `unzip -l` shows **no `.so` and no
+  `lib/` entry** — only `assets/loaders.json` plus the 37 confs.
+- **Not verified:** no device run since the split. The download → stage → exec path
+  has not run on hardware, and the raw URLs only answer once `payloads/` is pushed
+  and the repo is public.
+
 ## 7. Next steps (pick up here)
 
 1. **Reboot, then run this exact build once** and confirm `LATE_LOAD_RC=0` via logcat:
@@ -507,8 +560,8 @@ decodes once, and creates the destination's parent directory.
    TimerRoot (`timer` + 37 confs) — see §6f. Still needed: GhostLock (`libghostlock.so`
    must be compiled from `src/`, plus the GLK1 profile serializer) and DirtyFrag
    (`libdfroot.so`/`libbootstrap.so` + the IpSec harness in `ExploitRunner`).
-   `Runner.stageAsset()` now chunks base64 in 60 KB appends, so large payloads stage
-   correctly.
+   `Runner.stageAsset()` chunks base64 in 45,000-byte slices and payloads are
+   downloaded from `payloads/` on demand instead of shipped in the APK (§6g).
 3. **Add the run button + manager picker to the UI.** `MainActivity` currently
    detects and ranks; the tap-to-run path is a stub by design.
 4. **Build the APK** with the invocation in §6b, then test on a real device.

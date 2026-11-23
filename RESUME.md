@@ -19,6 +19,7 @@ transcript; it contains dead ends that were later superseded.
 | `G:\Dev\AwesomRootApp\` | this Android project (remote `origin` = `AbShaheen184/awesome-temporary-root-app`, branch `master`) |
 | `G:\Dev\AwesomRoot\` | the 122 cloned upstream repos; `CATALOG.md` lists them |
 | `G:\Dev\AwesomRootApp\app\src\main\assets\loaders.json` | canonical index (109 loaders / 394 targets); regenerate with `tools/build_index.py`, never hand-edit |
+| `G:\Dev\AwesomRootApp\payloads\` | the 44 executables (43 `.so` + TimerRoot `timer`, 22.8 MiB) the app downloads on demand; `manifest.json` + `README.md` are the hosting index |
 | `G:\Dev\AwesomRootApp\HANDOFF.md` | the source of truth |
 | `G:\Dev\Tools\` | JDK 21 (`jdk-21.0.13.1+2`), NDK r28, CMake 3.31.6 |
 
@@ -45,10 +46,15 @@ candidate list (one hit: **Shark**, `CVE-2026-98260`), Shizuku transport live as
 `HANDOFF.md` §6e for the evidence and the eight bugs fixed to get there.
 
 Root My Pixel (29 exploits + its loader `libcve43499root.so`) and TimerRoot (`timer`
-binary + 37 kernel confs) are now bundled and wired against their upstream contracts
-(`HANDOFF.md` §6f) — compiled, not yet run on hardware. GhostLock and DirtyFrag cannot
-be bundled from the clones: their binaries are build products, and DirtyFrag also needs
-the IpSec harness ported.
+binary + 37 kernel confs) are wired against their upstream contracts (`HANDOFF.md`
+§6f) — compiled, not yet run on hardware. GhostLock and DirtyFrag cannot be built
+from the clones yet: their binaries are build products, and DirtyFrag also needs the
+IpSec harness ported.
+
+The payloads are **no longer in the APK**: all 44 executables live in `payloads/` in
+this repo and are downloaded from GitHub's raw host on first use, then staged into
+`/data/local/tmp` (`HANDOFF.md` §6g). The APK dropped from 21.4 MB to 6.3 MB and
+contains no `.so` at all. Downloads only work while the repo is public.
 
 ## The one thing to do next
 

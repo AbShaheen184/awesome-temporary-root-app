@@ -1,0 +1,226 @@
+{
+ "base_url": "https://raw.githubusercontent.com/AbShaheen184/awesome-temporary-root-app/master/payloads",
+ "count": 44,
+ "payloads": [
+  {
+   "file": "akita-CP2A.260805.005.so",
+   "bytes": 92928,
+   "sha256": "7ede4853ee73f2f7cfba24dae5b8c13dc19c197a3afab070820ae6eae1fad356"
+  },
+  {
+   "file": "blazer-CP2A.260705.006.so",
+   "bytes": 82976,
+   "sha256": "c659561ad500bbd746f22e0ed1e116686a19fe30d8a4b2d07a28accd3dbe8ab0"
+  },
+  {
+   "file": "bluejay-CP1A.260405.005.so",
+   "bytes": 128600,
+   "sha256": "878bb27d5c6bff466b8c97b1eff402380d8b9ac24436eedb8ce8d4267588d209"
+  },
+  {
+   "file": "bluejay-CP2A.260705.006.so",
+   "bytes": 128600,
+   "sha256": "81ff9e8c915044f02264e7cec0fd1a7bd564867a00aa827540a79aae5d5d8794"
+  },
+  {
+   "file": "caiman-CP2A.260705.006.so",
+   "bytes": 128824,
+   "sha256": "5032b91dd1336ff0418888e98996d86017356d5ccd28ecff56c0e1202e3c7409"
+  },
+  {
+   "file": "cheetah-CP2A.260705.006.so",
+   "bytes": 128600,
+   "sha256": "0ad04b8fdd88a451f10b0671e1bc454816ed5d4314983e563bcc04c011f706df"
+  },
+  {
+   "file": "comet-CP2A.260705.006.so",
+   "bytes": 128600,
+   "sha256": "d42f00aff0d8f60fbf9a01175b6485c282336774e975dcd52d3d591351ae1f8c"
+  },
+  {
+   "file": "cubs-CD1A.260618.001.C2.so",
+   "bytes": 141600,
+   "sha256": "1ed0b0909c52bc45398a4bd8c326c046fd3adbfd2328738cd614873f2cd59976"
+  },
+  {
+   "file": "felix-CP2A.260605.012.so",
+   "bytes": 128824,
+   "sha256": "1540bda01249bd4f6c52dd3ddc43444c1fc0152ba753daf4bed29f822205625d"
+  },
+  {
+   "file": "frankel-CP2A.260705.006.so",
+   "bytes": 118544,
+   "sha256": "9052e47b5b3bda2db6acb92590a6b2f0e5d462e0421d1bfc7d7e4d7da38704a8"
+  },
+  {
+   "file": "grizzly-CD1A.260618.001.C2.so",
+   "bytes": 141600,
+   "sha256": "a8eb8ea380d1748f62fa1cc12e30117eaaf5310dc5dfb761a48adcf5fc4f1899"
+  },
+  {
+   "file": "husky-CP2A.260705.006.so",
+   "bytes": 128600,
+   "sha256": "8ec2aa03ee1c10e419a0c7daeffba62bac854257db5ce0f4f887010b9261c5d9"
+  },
+  {
+   "file": "kodiak-CD1A.260618.001.C2.so",
+   "bytes": 141600,
+   "sha256": "8cf274f90f5275f99978a1c7d17278be933ec16a18e3bd460f5d08c3926fc26a"
+  },
+  {
+   "file": "komodo-CP2A.260705.006.so",
+   "bytes": 128824,
+   "sha256": "87e958f435f9ed992bbb6c72066227fb36fcddfbb1a8e626a2511961800cc276"
+  },
+  {
+   "file": "libcve43499root.so",
+   "bytes": 24176,
+   "sha256": "55347eaf529228e18669639e90122303ede60c2b766f06afc4092409c4174fbc"
+  },
+  {
+   "file": "libk61223.so",
+   "bytes": 450416,
+   "sha256": "da103ca84ae7a79443cb831d9d61cbc96e855cf0f1383a8d56c5c3e1a294baa1"
+  },
+  {
+   "file": "libk61230.so",
+   "bytes": 456720,
+   "sha256": "4a626316fb6766922bd633c489237d41972bff997af059994385be2f1202dc74"
+  },
+  {
+   "file": "libk61238.so",
+   "bytes": 456720,
+   "sha256": "4f6257516a842d1a26f6fa5c4fe523c27a678c4dfbf67475457f947b10632839"
+  },
+  {
+   "file": "libk61258.so",
+   "bytes": 498744,
+   "sha256": "2be48fc4988deb0d799d91ed043345542f464e5830e34f6c43e8de2f3007ac67"
+  },
+  {
+   "file": "libk61258x.so",
+   "bytes": 459032,
+   "sha256": "a2073b4acaa23fc4504d95b46e80ac75d4d31e891cc2ad868f54c2168392785b"
+  },
+  {
+   "file": "libk61269.so",
+   "bytes": 457664,
+   "sha256": "6ce22d37264fd676dc3442bbc57c66a531240f15aa7037b872bb1ba9169b2c3a"
+  },
+  {
+   "file": "libk61821.so",
+   "bytes": 445712,
+   "sha256": "4f11a985f44f7d61bc43a310f33718aabc92409758cb9a560a7d6fb4f78fb8a4"
+  },
+  {
+   "file": "libk61821p.so",
+   "bytes": 495976,
+   "sha256": "5292811b7e257940fdd8a83ae554f9935ca651f6731f6726da8a48daf65183e6"
+  },
+  {
+   "file": "libk61821x.so",
+   "bytes": 458728,
+   "sha256": "c15f63400dbe03d0185dde2543281fbfd58b85b2ae0218f4567881fd5d23df3e"
+  },
+  {
+   "file": "libk66118.so",
+   "bytes": 457600,
+   "sha256": "36c94c7e7b338a89ca53691360f97b7978c1755ffb92d4ac9e8cf58365f2b730"
+  },
+  {
+   "file": "libk66127.so",
+   "bytes": 488528,
+   "sha256": "efa9a6cd1975e3e360e9ab3c1c31636d99dee1138cd3f721588c0209437abca5"
+  },
+  {
+   "file": "libk6689.so",
+   "bytes": 456784,
+   "sha256": "59f2d0c2a4cb9686e21a5f79253e5a1a10899db5a9af52b804120f20b6a06354"
+  },
+  {
+   "file": "libksud_universal.so",
+   "bytes": 12652520,
+   "sha256": "d14f50dfb36fd27c83cf6ef51ee5193224a5bfff99f0bc3e2e7d6667a11867fd"
+  },
+  {
+   "file": "lynx-CP2A.260705.006.so",
+   "bytes": 128600,
+   "sha256": "6d76d20c0235178d27a30517f778a228c7b4dd13c54cc58781cd0c2b49d0857a"
+  },
+  {
+   "file": "mustang-CP2A.260705.006.so",
+   "bytes": 83552,
+   "sha256": "fbdbed0a3e93f3e36d9262b62c0284ae42acbc181417436b20f9298ffa3ad099"
+  },
+  {
+   "file": "oriole-CP2A.260705.006.so",
+   "bytes": 92440,
+   "sha256": "46ed1e49ccbbae2529404876428b1d19501570b5cedfa32bfdf5ce066a989e40"
+  },
+  {
+   "file": "panther-BP2A.250705.008.so",
+   "bytes": 128824,
+   "sha256": "e3df38d2a9c843649003b554c017d7f118e6062b4011130163325fb558af1b4f"
+  },
+  {
+   "file": "panther-CP2A.260705.006.so",
+   "bytes": 128600,
+   "sha256": "b0d47e35e25846e63a534f6c2c6af0c88fb2ffffcf27550be09528393facae91"
+  },
+  {
+   "file": "rango-CP2A.260705.006.so",
+   "bytes": 82976,
+   "sha256": "09c340d163afe1c7ef0e8b57da2d123f445eaf6aa4dda8387fbeca71a4ad6a98"
+  },
+  {
+   "file": "raven-CP2A.260705.006.so",
+   "bytes": 128824,
+   "sha256": "ab56cbb831cb2dc8305ffd4739aa86388180a8918ac22d1e1780c577d051477e"
+  },
+  {
+   "file": "shiba-CP2A.260705.006.so",
+   "bytes": 128600,
+   "sha256": "f7f19cad7ed301c233b1cd0de00e35d765d9935d230f9da51b9d9fbaf92b8fa1"
+  },
+  {
+   "file": "stallion-CP2A.260805.005.so",
+   "bytes": 128824,
+   "sha256": "85fe9739aaafbe3fdfe9d71444dfe00d0c5d3f02c103ab6d17f9da1cb3671b9a"
+  },
+  {
+   "file": "tangorpro-BP1A.250405.007.so",
+   "bytes": 128824,
+   "sha256": "a9e974bb6b80ef471584ca4aeb8bd333236e0a4b65b0c9368445828942fd0f39"
+  },
+  {
+   "file": "tangorpro-CP2A.260705.006.so",
+   "bytes": 128824,
+   "sha256": "49fedabf57a63d11466cd44fb3eba59f50dc13b7e50711cbee5b6faf81251bae"
+  },
+  {
+   "file": "tegu-CP2A.260705.006.so",
+   "bytes": 92736,
+   "sha256": "1bc50989654802541f88ab23fa2b19bc43542dd07563d07d64ee2668e694265e"
+  },
+  {
+   "file": "timer",
+   "bytes": 2139696,
+   "sha256": "0131fbd2e0c3d84f94a4c7ebbb9ffaf51d70bef54eab96195ccd100b8caf1714"
+  },
+  {
+   "file": "tokay-AD1A.240905.004.so",
+   "bytes": 128824,
+   "sha256": "c5272c5b5794781d54a21855dd5eb90c7792595d514f09dc8c84e6fa3650771e"
+  },
+  {
+   "file": "tokay-CP2A.260705.006.so",
+   "bytes": 128824,
+   "sha256": "fccc392264439314f607b65cd8168be4b52c5a5babec8fd7ce24c83e007c059a"
+  },
+  {
+   "file": "yogi-CD1A.260618.001.C3.so",
+   "bytes": 141600,
+   "sha256": "bbe74a56989f4f30ff7650889948287cd19d931f23c9eca4430becfae04f3518"
+  }
+ ]
+}

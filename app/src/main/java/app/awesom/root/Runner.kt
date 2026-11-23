@@ -2,8 +2,6 @@ package app.awesom.root
 
 import android.content.Context
 import java.io.File
-import java.io.InputStream
-import java.io.OutputStream
 
 /** A single line of output from a running loader. */
 data class LogLine(val text: String, val kind: Kind) {
@@ -28,17 +26,22 @@ class Runner(private val context: Context) {
 
     private val workRoot = "/data/local/tmp/awesomroot"
 
-    private fun nativeDirList(dir: String): String = runCatching {
-         File(dir).listFiles()?.filter { it.name.endsWith(".so") }?.joinToString(", ") { it.name }
-             ?.takeIf { it.isNotBlank() } ?: "(none)"
-     }.getOrDefault("(unreadable)")
-
-     /** Stages a bundled asset into the loader work dir by piping its bytes through
+    /** Stages a payload into the loader work dir by piping its bytes through
      * the transport as base64. Returns the staged path, or null.
+     *
+     * [assetName] is the name (or, for the small configs still bundled, the
+     * asset path) the payload is known by; the payloads themselves now live in
+     * `payloads/` in the repo and are downloaded on first use by [PayloadStore].
      */
-    private fun stageAsset(transport: Transport, assetName: String, destName: String): String? {
-        val bytes = runCatching { context.assets.open(assetName).use { it.readBytes() } }.getOrNull()
-            ?: return null
+    private fun stageAsset(
+        transport: Transport,
+        assetName: String,
+        destName: String,
+        onLine: (LogLine) -> Unit,
+    ): String? {
+        val bytes = PayloadStore.bytes(context, assetName) { msg ->
+            onLine(LogLine(msg, LogLine.Kind.STEP))
+        } ?: return null
         val dest = "$workRoot/$destName"
         val part = "$dest.b64"
         val dir = dest.substringBeforeLast('/')
@@ -48,11 +51,32 @@ class Runner(private val context: Context) {
          * binary and the per-device exploit .so files cannot go in one echo.
          * The app's own uid cannot read /data/local/tmp back, so the staged
          * path is returned as soon as the shell steps succeed.
+         *
+         * Each slice is encoded on its own (RAW_CHUNK is a multiple of 3, so no
+         * padding in the middle): encoding the 12.6 MB ksud payload in one go
+         * would hold ~80 MB of byte array, base64 string and chunks at once.
          */
-        val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-        for ((i, chunk) in b64.chunked(CHUNK).ifEmpty { listOf("") }.withIndex()) {
-            val op = if (i == 0) ">" else ">>"
+        if (bytes.size > 1 shl 20) {
+            onLine(LogLine(
+                "staging ${assetName.substringAfterLast('/')} " +
+                    "(${(bytes.size + 1023) / 1024} KiB) through the transport…",
+                LogLine.Kind.STEP
+            ))
+        }
+        var off = 0
+        var first = true
+        if (bytes.isEmpty()) {
+            if (!shOk(transport, "mkdir -p $dir && : > $part")) return null
+        }
+        while (off < bytes.size) {
+            val end = minOf(off + RAW_CHUNK, bytes.size)
+            val chunk = android.util.Base64.encodeToString(
+                bytes, off, end - off, android.util.Base64.NO_WRAP
+            )
+            val op = if (first) ">" else ">>"
             if (!shOk(transport, "mkdir -p $dir && printf %s '$chunk' $op $part")) return null
+            first = false
+            off = end
         }
         return if (shOk(transport, "base64 -d $part > $dest && chmod 755 $dest && rm -f $part")) dest
         else null
@@ -124,17 +148,26 @@ class Runner(private val context: Context) {
         val engine = target.runner
             ?: return RunResult.Failure(-1, "no runner in index")
         val lib = sharkRunnerLib(engine, p) ?: return RunResult.Failure(
-            -1, "no bundled runner for engine '$engine'"
+            -1, "no runner for engine '$engine'"
         )
-        val nativeDir = context.applicationInfo.nativeLibraryDir
-        val bin = File(nativeDir, lib)
-        if (!bin.isFile) {
-            return RunResult.Failure(
+        // The runner and the universal ksud payload used to sit in jniLibs.
+        // Neither is shipped in the APK any more, and API 29+ cannot exec a
+        // file in the app's home directory, so both are downloaded (if needed)
+        // and staged into the shell-writable work dir before the run.
+        val bin = stageAsset(transport, lib, lib, onLine)
+            ?: return RunResult.Failure(
                 -1,
-                "$lib is not bundled in this APK. Available runners in this build: " +
-                    nativeDirList(nativeDir)
+                "cannot get payloads/$lib (not cached and the download failed)"
             )
-        }
+        val kind = managerRuntime(managerPkg)
+        val universal = kind in UNIVERSAL_KINDS
+        val universalKsud = if (universal) {
+            stageAsset(transport, "libksud_universal.so", "libksud_universal.so", onLine)
+                ?: return RunResult.Failure(
+                    -1,
+                    "cannot get payloads/libksud_universal.so for engine '$engine'"
+                )
+        } else "$workRoot/libksud_universal.so"
 
         // The runner stages ksud straight out of the installed manager's APK.
         // No manager copy on disk means the late-load can never happen, so say
@@ -146,9 +179,7 @@ class Runner(private val context: Context) {
                     "install/enable KernelSU first; without ksud the loader cannot late-load."
             )
 
-        val kind = managerRuntime(managerPkg)
         val gate = isGateKernel(engine, p.kernelRelease)
-        val universal = kind in UNIVERSAL_KINDS
         val chase = p.isVivoOem() || engine.equals("CVE66127", true) ||
             engine.equals("CVE61223", true)
 
@@ -168,13 +199,13 @@ class Runner(private val context: Context) {
             "PYB110_VFS=0",
             "PYB110_CHASE=${if (chase) 1 else 0}",
             "PYB110_UNIVERSAL=${if (universal) 1 else 0}",
-            "PYB110_UNIVERSAL_KSUD=$nativeDir/libksud_universal.so",
+            "PYB110_UNIVERSAL_KSUD=$universalKsud",
             "PYB110_FILES_DIR=$workRoot",
             "PYB110_SAFE_MODE=0",
         )
         onLine(LogLine("runner  $lib  kmi=$kmi  manager=$kind  ksud=$ksud", LogLine.Kind.STEP))
         onLine(LogLine("gate=$gate universal=$universal chase=$chase", LogLine.Kind.STEP))
-        return exec(bin.absolutePath, listOf("run"), env, workRoot, transport, onLine,
+        return exec(bin, listOf("run"), env, workRoot, transport, onLine,
             successMarker = "LATE_LOAD_RC=0")
     }
 
@@ -250,10 +281,12 @@ class Runner(private val context: Context) {
                     "build and the --samsung chain, which is not wired yet."
             )
         }
-        val conf = stageAsset(transport, confAsset, "conf/$base")
+        val conf = stageAsset(transport, confAsset, "conf/$base", onLine)
             ?: return RunResult.Failure(-1, "missing $confAsset in the APK assets")
-        val bin = stageAsset(transport, "timerroot/timer", "timer")
-            ?: return RunResult.Failure(-1, "missing timerroot/timer in the APK assets")
+        val bin = stageAsset(transport, "timerroot/timer", "timer", onLine)
+            ?: return RunResult.Failure(
+                -1, "cannot get payloads/timer (not cached and the download failed)"
+            )
         val env = listOf(
             "PATH=/system/bin:/system/xbin:/data/adb/ksu/bin", "HOME=/", "TIMER_KMI=$kmi",
         )
@@ -285,15 +318,14 @@ class Runner(private val context: Context) {
         managerPkg: String, kmi: String, onLine: (LogLine) -> Unit,
     ): RunResult {
         val asset = target.runner ?: return RunResult.Failure(-1, "no exploit asset in index")
-        val helper = File(context.applicationInfo.nativeLibraryDir, "libcve43499root.so")
-        if (!helper.isFile) {
-            return RunResult.Failure(
-                -1,
-                "libcve43499root.so is not bundled in this APK. Available: " +
-                    nativeDirList(context.applicationInfo.nativeLibraryDir)
+        // The helper used to be a jniLibs entry; it is a downloaded payload now
+        // and is staged next to the exploit so the shell uid can exec it.
+        val helperName = "libcve43499root.so"
+        val helper = stageAsset(transport, helperName, helperName, onLine)
+            ?: return RunResult.Failure(
+                -1, "cannot get payloads/$helperName (not cached and the download failed)"
             )
-        }
-        val exploit = stageAsset(transport, asset, "rmp-exploit.so")
+        val exploit = stageAsset(transport, asset, "rmp-exploit.so", onLine)
             ?: return RunResult.Failure(-1, "missing $asset in the APK assets")
         val env = listOf(
             "PATH=/system/bin:/system/xbin:/data/adb/ksu/bin", "HOME=/",
@@ -301,8 +333,8 @@ class Runner(private val context: Context) {
         )
         onLine(LogLine("runner  ${asset.substringAfterLast('/')}  kmi=$kmi", LogLine.Kind.STEP))
         return exec(
-            helper.absolutePath,
-            listOf("--run-payload", exploit, helper.absolutePath, "$workRoot/rmp-exploit.log"),
+            helper,
+            listOf("--run-payload", exploit, helper, "$workRoot/rmp-exploit.log"),
             env, workRoot, transport, onLine,
             successMarker = "RMP_PAYLOAD_RESULT:v1",
             aliasMarkers = listOf("success=1", "root=1"),
@@ -488,8 +520,11 @@ class Runner(private val context: Context) {
             "RMP_PAYLOAD_RESULT:v1",
         )
 
-        /** `MAX_ARG_STRLEN` is 128 KiB; keep each staged base64 append well under it. */
-        private const val CHUNK = 60_000
+        /**
+         * Raw bytes per staged base64 append: a multiple of 3, so every slice
+         * encodes to exactly 60_000 chars — under `MAX_ARG_STRLEN` (128 KiB).
+         */
+        private const val RAW_CHUNK = 45_000
 
         /** `APP_PROTOCOL` from TimerRoot's `p7a/timer_p7a.c`. */
         private const val TIMER_PROTOCOL = 3
