@@ -28,8 +28,12 @@ class Runner(private val context: Context) {
 
     private val workRoot = "/data/local/tmp/awesomroot"
 
-    /**
-     * Stages a bundled asset into the loader work dir by piping its bytes through
+    private fun nativeDirList(dir: String): String = runCatching {
+         File(dir).listFiles()?.filter { it.name.endsWith(".so") }?.joinToString(", ") { it.name }
+             ?.takeIf { it.isNotBlank() } ?: "(none)"
+     }.getOrDefault("(unreadable)")
+
+     /** Stages a bundled asset into the loader work dir by piping its bytes through
      * the transport as base64. Returns the staged path, or null.
      */
     private fun stageAsset(transport: Transport, assetName: String, destName: String): String? {
@@ -88,10 +92,24 @@ class Runner(private val context: Context) {
         loader: Loader, target: Target, p: DeviceProfile, transport: Transport,
         managerPkg: String, kmi: String, onLine: (LogLine) -> Unit,
     ): RunResult {
-        val lib = "lib${target.runner ?: return RunResult.Failure(-1, "no runner in index")}.so"
+        // The index stores the runner engine ("CVE66127"); the shipped file is
+        // lib<MODEL>.so, where MODEL is the digits of the CVE id (libk66127.so),
+        // or the full name for the 6.18 plant-core variants (libk61821p.so).
+        // Mirrors JailbreakCore.runnerLib() in the Shark fork.
+        val engine = target.runner
+            ?: return RunResult.Failure(-1, "no runner in index")
+        val model = Regex("""(?i)CVE0*(\d+)""").find(engine)?.groupValues?.get(1)
+            ?: engine.removePrefix("lib").removeSuffix(".so")
+        val lib = "lib${model.lowercase()}.so"
         val nativeDir = context.applicationInfo.nativeLibraryDir
         val bin = File(nativeDir, lib)
-        if (!bin.isFile) return RunResult.Failure(-1, "missing runner $lib in APK")
+        if (!bin.isFile) {
+            return RunResult.Failure(
+                -1,
+                "$lib is not bundled in this APK. Available runners in this build: " +
+                    nativeDirList(nativeDir)
+            )
+        }
 
         val env = listOf(
             "PATH=/system/bin:/system/xbin:/data/adb/ksu/bin",

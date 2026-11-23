@@ -255,6 +255,76 @@ call `Shizuku.requestPermission(1001)` when the probe fails.
 `origin`, branch `master`, HEAD `e75eaa9`). Auth is the Windows git credential store —
 no token in env, `git push` works directly.
 
+## 6d. Button/run fixes + current state (2026-11-23, later)
+
+**Why RUN BEST MATCH / TEST ALL were disabled.** `MainScreen.setCandidates()` updated the
+list and the cards but never called `renderButtons()`. The button row was therefore built
+once, in `init`, when `candidates` was still empty, and stayed `enabled=false` forever even
+though a card was drawn. Fixed: `setCandidates()` now calls `renderButtons()`.
+(logcat probe that found it: `renderButtons: candidates=0 busy=false canRun=false`.)
+TEST ALL remains correctly disabled while only one candidate matches — there is nothing to
+"test all"; it enables at ≥2.
+
+**Why the run failed with `missing runner libCVE66127.so`.** Two bugs in `Runner.runShark()`:
+
+1. It built the filename as `"lib" + target.runner + ".so"` → `libCVE66127.so`. The index
+   stores the engine id (`CVE66127`); the shipped file is named by the **model digits**:
+   `libk66127.so`. Mapping now mirrors `JailbreakCore.runnerLib()` in the Shark fork —
+   digits of the CVE id for the plain runners, full name for the 6.18 plant-core variants
+   (`libk61821p.so`).
+2. The runners were not in the APK at all. They are now bundled:
+   `app/src/main/jniLibs/arm64-v8a/libk*.so` + `libksud_universal.so` (18 MB,
+   from `CYB3R0ID694/Shark-Moto/.../jniLibs/arm64-v8a/`). Verified present in the installed
+   APK (`unzip -l` shows `lib/arm64-v8a/libk66127.so`, 488528 bytes).
+
+The failure message now lists what *is* in the build, so a missing runner reads as an
+actionable list instead of a bare name.
+
+**Log box.** Was a hardcoded 220dp and clipped long output. Now wrapped in its own
+ScrollView, grows to fit its content, caps at 45% of the viewport and scrolls internally,
+auto-scrolls to the newest line, extra bottom padding. Verified on device: 24 lines fully
+visible, no clipping, no wasted space.
+
+### Not yet verified — the actual exploit run
+
+After the rename fix the app resolves `libk66127.so` correctly, but **the run has not been
+confirmed end-to-end**. The last attempt produced no `running Shark` line in the UI log,
+and logcat showed a large GC pause plus repeated `Skipping invisible child` from
+`AccessibilityNodeInfoDumper` — i.e. the screen was scrolled such that the log was off-screen
+when the dump ran. Do not assume root happened or failed; re-test with a fresh launch and
+read the log by scrolling, or grep `logcat` for the runner's own markers
+(`LATE_LOAD_RC=`, `MODULE_STATE=`, `PLANT_CRED_OK`).
+
+Known prerequisite before this device can actually root: `me.weishu.kernelsu` is installed
+but its `nativeLibraryDir/libksud.so` must exist for the loader to stage `ksud`. Verify with:
+
+```bash
+adb shell pm path me.weishu.kernelsu
+adb shell ls -l <that dir>/lib/arm64/libksud.so
+```
+
+Also note the Shark runner expects `PYB110_MANAGER` / `PYB110_KMI`; `runShark()` sets
+`PYB110_MANAGER=kernelsu` unconditionally and should use the selected manager kind.
+
+### Commits / repo
+
+| hash | what |
+|---|---|
+| `bd8bd35` | initial model: index generator, app skeleton, detector UI |
+| `f183d9e` | compile fixes, toolchain → `G:\Dev\Tools`, first working APK |
+| `aa2111f` | doc cleanup |
+| `4d612c2` | GUI main screen, Shizuku grant flow, exact-match candidates |
+| `488ab60` | ignore `.kotlin` logs |
+| `e75eaa9` | README, push to GitHub |
+| `cf1b80a` | HANDOFF: GUI round + Shizuku finding |
+| `8ba1c14` | log box fits its content |
+
+Remote `origin` = `https://github.com/AbShaheen184/awesome-temporary-root-app.git`,
+branch `master`, HEAD `cf1b80a` (last pushed). **Unpushed local work exists** — the button
+fix, the runner rename, the bundled jniLibs and this section are not on GitHub yet.
+
+**APK**: `app/build/outputs/apk/debug/app-debug.apk` (~24 MB with the bundled runners).
+
 ## 7. Next steps (pick up here)
 
 1. **Finish wiring the runner contracts.** `Runner.run()` currently has real

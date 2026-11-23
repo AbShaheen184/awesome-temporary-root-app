@@ -135,6 +135,10 @@ class MainScreen(
     fun setCandidates(list: List<Pair<Loader, Target>>) {
         candidates = list
         renderCandidates()
+        // The run buttons depend on the candidate list, so they must be rebuilt
+        // here too. Without this the row kept the state it was first built with
+        // (empty list) and stayed disabled forever.
+        renderButtons()
     }
 
     fun setBusy(b: Boolean) {
@@ -258,6 +262,10 @@ class MainScreen(
     private fun renderButtons() {
         runButtons.removeAllViews()
         val canRun = candidates.isNotEmpty() && !busy
+        android.util.Log.d(
+            "AwesomRoot",
+            "renderButtons: candidates=${candidates.size} busy=$busy canRun=$canRun"
+        )
         runButtons.addView(button("RUN BEST MATCH", primary = true, enabled = canRun) {
             candidates.firstOrNull()?.let { callbacks.onRun(it.first, it.second) }
         }, 0, LayoutParams(0, WRAP, 1f).apply { rightMargin = dp(6) })
