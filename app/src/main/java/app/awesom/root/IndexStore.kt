@@ -115,13 +115,13 @@ object IndexStore {
                 loader = o.optString("loader"),
                 matchKind = o.optString("match_kind"),
                 matchKey = o.optString("match_key"),
-                kernel = o.optString("kernel").ifBlank { null },
-                kmi = o.optString("kmi").ifBlank { null },
+                kernel = o.str("kernel"),
+                kmi = o.str("kmi"),
                 devices = devs,
-                page = o.optString("page").ifBlank { null },
-                runner = o.optString("runner").ifBlank { null },
-                note = o.optString("note").ifBlank { null },
-                source = o.optString("source").ifBlank { null },
+                page = o.str("page"),
+                runner = o.str("runner"),
+                note = o.str("note"),
+                source = o.str("source"),
                 extra = o.optJSONObject("extra"),
             )
         }
@@ -129,6 +129,17 @@ object IndexStore {
         targets = ts
         true
     }.getOrDefault(false)
+
+    /**
+     * A string field, or null when it is absent or JSON `null`.
+     *
+     * `optString()` returns the *literal* string `"null"` for a JSON null (it
+     * goes through `JSON.toString(JSONObject.NULL)`), so `ifBlank { null }`
+     * never fired and fields like `kmi` reached the runner as `"null"` — which
+     * made the loader ask ksud for `null_kernelsu.ko`.
+     */
+    private fun JSONObject.str(key: String): String? =
+        optString(key).takeIf { it.isNotBlank() && !it.equals("null", true) }
 
     fun loaders(): List<Loader> = loaders
     fun targets(): List<Target> = targets

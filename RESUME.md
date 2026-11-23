@@ -40,32 +40,26 @@ on JDK 25/27 version strings. `gradle.properties` pins `ndk.dir`/`cmake.dir`.
 
 Working and verified on a vivo V2408A (iQOO 13): device card, KMI, exact-match
 candidate list (one hit: **Shark**, `CVE-2026-98260`), Shizuku transport live as uid
-2000, manager `me.weishu.kernelsu`, and enabled RUN BEST MATCH button.
-
-Fixed since the last push: disabled-button bug (`setCandidates` did not call
-`renderButtons`), wrong runner filename (`libCVE66127.so` → `libk66127.so`),
-Shark runners now bundled in `jniLibs/arm64-v8a/`.
+2000, manager `me.weishu.kernelsu`, and **the exploit itself ran and rooted the boot** —
+`/proc/modules` showed `kernelsu … Live` and `/data/adb` appeared root-owned. See
+`HANDOFF.md` §6e for the evidence and the eight bugs fixed to get there.
 
 ## The one thing to do next
 
-**Confirm or refute the actual exploit run.** It has NOT been verified end-to-end.
-Launch fresh, tap RUN BEST MATCH, then read the result by grepping logcat for the
-runner's own markers rather than trusting the on-screen log:
+**One cold-boot run of this exact build.** Root is per-boot, and the successful run
+predates the final `kmi=null` fix. So: reboot the device (which also clears the parked
+fake-cred child), install the APK, tap RUN BEST MATCH, and read the result from logcat
+now that the UI log is mirrored there:
 
 ```bash
-adb logcat -d | grep -E "LATE_LOAD_RC=|MODULE_STATE=|PLANT_CRED_OK|KSUD_MISSING"
+adb logcat -d | grep -E "LATE_LOAD_RC=|MODULE_STATE=|PLANT_CRED_OK|KSUD_MISSING|LATE_LOAD_SKIP"
 ```
 
-Check the prerequisite first — the loader stages `ksud` out of the manager's APK:
+A run that prints `LATE_LOAD_SKIP=env-missing` or exits 0 without `LATE_LOAD_RC=0` is a
+**false** success — the app now reports those as failures, do not trust the exit code.
 
-```bash
-adb shell pm path me.weishu.kernelsu
-adb shell ls -l <that dir>/lib/arm64/libksud.so
-```
-
-If `libksud.so` is absent, root cannot happen on this device and the app should say
-so instead of running. Also fix `Runner.runShark()`: it hardcodes
-`PYB110_MANAGER=kernelsu` instead of using the selected manager kind.
+Then finish the manager's own first-run setup so `su` lands in PATH; until then root is
+only visible as a live module, not as a shell (`su: inaccessible or not found`).
 
 ## Do not
 

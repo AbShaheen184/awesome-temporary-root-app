@@ -147,6 +147,10 @@ class MainScreen(
     }
 
     fun log(line: String, kind: LogLineKind = LogLineKind.OUT) {
+        // Mirror to logcat: the runner's own markers (LATE_LOAD_RC=, MODULE_STATE=,
+        // PLANT_CRED_OK, KSUD_MISSING, LATE_LOAD_SKIP=) are otherwise only visible
+        // on screen, which made a run impossible to verify off-device.
+        android.util.Log.i("AwesomRoot", line)
         val c = when (kind) {
             LogLineKind.OK -> color("ok")
             LogLineKind.FAIL -> color("bad")

@@ -318,6 +318,9 @@ Also note the Shark runner expects `PYB110_MANAGER` / `PYB110_KMI`; `runShark()`
 | `e75eaa9` | README, push to GitHub |
 | `cf1b80a` | HANDOFF: GUI round + Shizuku finding |
 | `8ba1c14` | log box fits its content |
+| `53e5c67` | disabled run buttons + (incorrectly) runner filename |
+| `373f5b9` | RESUME.md continuation point |
+| _this round_ | real runner filename, `PYB110_KSUD`, manager kind, `kmi=null`, env parity, logcat mirror |
 
 Remote `origin` = `https://github.com/AbShaheen184/awesome-temporary-root-app.git`,
 branch `master`, HEAD `cf1b80a` (last pushed). **Unpushed local work exists** — the button
@@ -325,9 +328,97 @@ fix, the runner rename, the bundled jniLibs and this section are not on GitHub y
 
 **APK**: `app/build/outputs/apk/debug/app-debug.apk` (~24 MB with the bundled runners).
 
+## 6e. The exploit run — VERIFIED (2026-11-23, 15:38)
+
+**Root happened on the vivo V2408A.** The Shark runner (CVE-2026-98260, kernel
+`6.6.127-android15-8-gd489d4ad2a70-abogki567717946-4k`) completed plant → fake cred →
+late-load on this boot. Ground truth, not UI text:
+
+```
+$ adb shell cat /proc/modules | grep kernelsu
+kernelsu 180224 1 - Live 0x0000000000000000 (O)
+
+$ adb shell ls -la /data/local/tmp/awesomroot/
+-rwxr-xr-x 1 root root 330664 ko.bin          # extracted + bound as root
+-rw------- 1 root root 330982 ko_bound.bin
+
+$ adb shell ls -ld /data/adb
+ drwx------ 3 root root  /data/adb                # created by ksud install
+```
+
+`ksud install` then opened the KernelSU manager (`me.weishu.kernelsu/.ui.MainActivity`
+was the top resumed activity). The app's own device card re-probes and shows
+**Root now: active** (verified against the fresh detection path). Runner log from that
+run: `PLANT_CRED_OK child=…`, `[child] woke uid=0 euid=0`, `[auth] hook0/hook1/hook2`,
+`[fake] child uid=0 euid=0`, `LOAD_EXTRACT=…`, `PLANT_OK: cred ready`.
+
+**Still open after that run:** `su` is not on PATH yet (`/system/bin/sh: su:
+ inaccessible or not found`) and `/data/adb/ksu/bin` is 0700 root — the manager's own
+first-run setup (install su / reboot prompt) never completed because the app process was
+force-stopped mid-run. Also the parked fake-cred child (`libk66127.so`, reparented to
+init, holding the spray sockets) survives until reboot.
+
+### Bugs found and fixed in this round
+
+1. **The runner filename was still wrong.** `Runner` built `lib` + digits → `lib66127.so`.
+   The shipped file is `libk66127.so`. On-device log: `FAILED: lib66127.so is not
+   bundled in this APK. Available runners in this build: … libk66127.so …`. The §6d note
+   claimed this was fixed; it was not. Now `sharkRunnerLib()` mirrors
+   `JailbreakCore.runnerLib()`, including `libk61821p`/`libk61821x` for the 6.18.21
+   plant-core releases and `libk61258`/`libk61258x`.
+2. **`PYB110_KSUD` was never passed.** The runner reads it for the late-load and prints
+   `LATE_LOAD_SKIP=env-missing ksud=(null) pkg=…` then **returns 0 without loading
+   anything** — a silent false success. It is now the manager's
+   `nativeLibraryDir/libksud.so`, and a manager without that file is refused up front
+   with an actionable message instead of running.
+3. **`PYB110_MANAGER` was hardcoded** to `kernelsu`. Now mapped from the selected
+   package (`next` / `next_spoofed` / `bakasu` / `sukisu` / `finasu` / `kernelsu`), per
+   `JailbreakCore.managerRuntime()`.
+4. **`kmi` arrived as the literal string `null`.** `org.json`'s `optString()` returns
+   `"null"` for a JSON `null`, so `ifBlank { null }` never fired. Symptom on device:
+   `LOAD_EXTRACT=… debug extract-binary null_kernelsu.ko …` → `Error: asset not found:
+   null_kernelsu.ko`. `IndexStore` now parses optional fields through `str()`, which
+   treats blank and `"null"` as absent.
+5. **The rest of the runner env now mirrors `JailbreakCore.buildEnv()`**: `PYB110_GATE`
+   (CVE66127 and the 6.18.21/6.12.58 gate releases), `PYB110_CHASE` (vivo/iQOO),
+   `PYB110_UNIVERSAL` + `PYB110_UNIVERSAL_KSUD` (the six universal engines),
+   `PYB110_UNLOAD_GUARD`, `PYB110_DISABLE_ANTIROOT`, `PYB110_SAFE_MODE`,
+   `PYB110_FILES_DIR`. Divergence: `FILES_DIR` points at `/data/local/tmp/awesomroot`,
+   not the app's 0700 `filesDir`, because the runner executes as uid 2000 and cannot
+   write there.
+6. **Work dir is created through the transport.** The transport uses `dir` as the child's
+   cwd; a missing `/data/local/tmp/awesomroot` made `newProcess` fail. It is now
+   `mkdir -p`'d once via the transport (the app uid cannot write `/data/local/tmp`).
+7. **Stale success markers.** `Runner.captured` was never cleared between runs, so run #2
+   could report success from run #1's marker. Cleared per run; a skipped late-load is now
+   called out in the failure reason, and `SKIP=`/`KSUD_MISSING`/`LATE_LOAD_RC=<non-zero>`
+   are coloured as failures.
+8. **The UI log is mirrored to logcat** (`I AwesomRoot:`) so a run can be verified with
+   `adb logcat -d | grep -E "LATE_LOAD_RC=|MODULE_STATE=|PLANT_CRED_OK|KSUD_MISSING"`,
+   which is what RESUME.md asks for. On-screen text was the only copy before.
+
+### Not yet verified
+
+- **A cold-boot run of this exact build.** The successful run above used the build with
+  fixes 1–3 but *before* the `kmi=null` fix (4), which is why its gate worker still shows
+  `null_kernelsu.ko` before the load completed. The final build has not been run from a
+  clean boot; root is per-boot, so that needs a reboot first.
+- **`su` / module manager wiring.** `/data/adb/ksu/bin` exists (0700 root) but no `su` in
+  PATH; the manager's first-run setup must be finished before shell root is usable.
+- TEST ALL (needs ≥2 candidates), the other ~95 loader branches, Stellar transport.
+
 ## 7. Next steps (pick up here)
 
-1. **Finish wiring the runner contracts.** `Runner.run()` currently has real
+1. **Reboot, then run this exact build once** and confirm `LATE_LOAD_RC=0` via logcat:
+
+   ```bash
+   adb logcat -d | grep -E "LATE_LOAD_RC=|MODULE_STATE=|PLANT_CRED_OK|KSUD_MISSING|LATE_LOAD_SKIP"
+   ```
+
+   A reboot also clears the parked fake-cred child and the loaded module (root is per-boot).
+2. **Finish the manager setup** so `su` works, then have the app verify root by `su -c id`
+   rather than only `/proc/modules`.
+3. **Finish wiring the runner contracts.** `Runner.run()` currently has real
    implementations for `shark`, `timerroot`, `root-my-pixel`, `ghostlock-app`,
    `ghostkey`, `dirtyfrag`/`dirtyfalg-vr`/`dfroot`/`galaxycrash`; everything else
    falls through to `runGeneric()` and returns a clear "not wired yet" failure.
