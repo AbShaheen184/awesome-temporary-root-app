@@ -242,7 +242,17 @@ returning `moe.shizuku.server.IRemoteProcess` (`getInputStream`/`getErrorStream`
 - `gradle.properties` points `sdk.dir` at an absolute Windows path — fine here,
   wrong anywhere else.
 
-## 8. Hard rules (from upstream, do not soften)
+## 8. Commits
+
+| hash | what |
+|---|---|
+| `bd8bd35` | initial model: index generator, app skeleton, detector UI |
+| `f183d9e` | compile fixes + toolchain moved to `G:\Dev\Tools`; **BUILD SUCCESSFUL**, APK produced |
+
+**APK**: `G:\Dev\AwesomRootApp\app\build\outputs\apk\debug\app-debug.apk`
+5.8 MB, `app.awesom.root` v0.1, `minSdk 31 / targetSdk 36`, `assets/loaders.json` bundled.
+
+## 9. Hard rules (from upstream, do not soften)
 
 - Match the **exact** `uname -r` and page size. Never fall back to a near match.
 - A loader needs its named manager installed; on Samsung, `diabl0w/KernelSU`.
