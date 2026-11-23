@@ -66,7 +66,7 @@ data class Target(
             if (pg.trim() == p.pageSize.toString()) s += 30 else s -= 100
         }
         if (kmi != null && kmi.isNotBlank()) {
-            val want = kmiFor(p.kernelRelease)
+            val want = IndexStore.kmiFor(p.kernelRelease)
             if (want != null && want == kmi) s += 25 else s -= 25
         }
         return s

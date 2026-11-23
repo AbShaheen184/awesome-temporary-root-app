@@ -174,30 +174,73 @@ Available (from `--list`): `ndk;28.0.13004108` is the newest 28.x; `cmake;3.31.6
 (`3.42.0` does **not** exist; 4.x is 4.0.2+). A background install was started (session
 `proc_f56384ca49cb`); verify with `ls "$SDK/ndk" "$SDK/cmake"`.
 
+## 6b. Gradle build — exact working invocation (verified)
+
+```bash
+cd "G:/Dev/AwesomRootApp"
+export JAVA_HOME="G:/Dev/Tools/jdk-21.0.13.1+2"
+export ANDROID_HOME="C:/Users/abuza/AppData/Local/Android/Sdk"
+export ANDROID_NDK_HOME="G:/Dev/Tools/android-ndk-r28"
+./gradlew --no-daemon :app:assembleDebug
+```
+
+**JDK matters.** The Kotlin 2.0.21 Gradle plugin carries an old embedded
+`JavaVersion.parse` that throws `IllegalArgumentException` on the version strings of
+JDK 25 and 27 (`25.0.4`, `27.0.1`). Neither the Studio JBR (25) nor
+`C:\Program Files\Java\jdk-27.0.1` works. Use **JDK 21**.
+
+**All downloaded tools were moved to `G:\Dev\Tools`** (which already held
+`jdk-17.0.11+9`, `android-ndk-r30`, `apktool.jar`, `jadx.jar`, `cloudflared`,
+`elf_analyzer.py`, `jni_focus.py`, `rea_venv`). Now there:
+
+| Path | Note |
+|---|---|
+| `G:\Dev\Tools\jdk-21.0.13.1+2` | Temurin 21 — **use this to build** |
+| `G:\Dev\Tools\jdk-17.0.11+9` | was already there |
+| `G:\Dev\Tools\android-ndk-r28` | NDK 28.0.13004108 (2.2 GB), moved out of the SDK |
+| `G:\Dev\Tools\android-ndk-r30` | was already there, unextracted (zip alongside) |
+| `G:\Dev\Tools\cmake-3.31.6` | CMake 3.31.6, moved out of the SDK |
+
+`gradle.properties` pins `ndk.dir`/`cmake.dir` to those paths. The `sdk.dir` stays at
+`%LOCALAPPDATA%\Android\Sdk` for `platforms`/`build-tools` (35.0.0, 36.0.0, android-34/35/36/36.1/37.0).
+
+Gradle 8.9 (wrapper), AGP 8.7.3, Kotlin 2.0.21, `compileSdk = 36`, `minSdk = 31`.
+No Compose plugin — the UI is plain Views on purpose, so one fewer plugin version to fight.
+
+**Shizuku API shape (verified by `javap` on the cached AARs):**
+`rikka.shizuku.Shizuku.getBinder()` / `pingBinder()` / `getUid()` are in `dev.rikka.shizuku:api`.
+The process API is `moe.shizuku.server.IShizukuService.Stub.asInterface(binder).newProcess(String[], String[], String)`
+returning `moe.shizuku.server.IRemoteProcess` (`getInputStream`/`getErrorStream`/`getOutputStream` → `ParcelFileDescriptor`,
+`waitFor()` → int, `destroy()`). There is **no** `rikka.shizuku.ShizukuProcess` or `ShizukuServiceInterface`.
+
 ## 7. Next steps (pick up here)
 
-1. **Resolve §4 ABI question.** Compare a real upstream release APK's `lib/arm64-v8a/*.so`
-   against the cloned file. This gates everything else.
-2. **Scaffold the Gradle project** in `G:\Dev\AwesomRootApp\app` (AGP 9.x + Kotlin 2.x,
-   `compileSdk 37`, `minSdk 33`, JDK 17+; the reference apps use `namespace`/`applicationId`
-   of their own, use e.g. `app.awesom.root`). `gradlew` from any cloned repo
-   (`CYB3R0ID694/Shark-Moto/app/gradlew.bat`) can be reused.
-3. **Ports to write** (Kotlin, in `app/src/main/java/app/awesom/root/`):
-   - `DeviceProbe` — `ro.product.*`, `ro.build.*`, `ro.build.fingerprint`, `uname -r`,
-     `getconf PAGESIZE`, `getenforce`, ABI. Privileged reads via the transport.
-   - `IndexStore` — loads `assets/loaders.json`, matches on the keys above, returns
-     ranked candidates (exact `kernel-release` > `model+kernel` > `kmi`).
-   - `Transport` — Shizuku first, then Stellar, then local-ADB, then plain `su`.
-     Reference impls: `kpgc10kai/Shark/.../Privileged.kt`,
-     `YuKongA/ghostlock-app/.../ShizukuExploitRunner.kt`,
-     `MVN123123123123123/TimerRoot/.../UserService.java`.
-   - `Runner` — per-loader exec wrapper: stage binaries from assets to `/data/local/tmp`,
-     set the loader's env, stream stdout, map exit code + success markers
-     (`LATE_LOAD_RC=0`, `/proc/modules` has `kernelsu ... Live`, `su -c id` → `u:r:ksu:s0`).
-   - UI: device card, candidate list, run log, manager picker.
-4. **Build**: `JAVA_HOME=<studio jbr> ./gradlew :app:assembleDebug` with
-   `sdk.dir` in `local.properties` pointing at the SDK. Then install and test on a device.
+1. **Finish wiring the runner contracts.** `Runner.run()` currently has real
+   implementations for `shark`, `timerroot`, `root-my-pixel`, `ghostlock-app`,
+   `ghostkey`, `dirtyfrag`/`dirtyfalg-vr`/`dfroot`/`galaxycrash`; everything else
+   falls through to `runGeneric()` and returns a clear "not wired yet" failure.
+   Add one branch per loader, using the verified contracts in §4 and the
+   `Target.runner` / `Target.extra` fields from the index.
+2. **Bundle the payloads.** Copy the arm64 payloads the loaders need from
+   `G:\Dev\AwesomRoot\<repo>` into `app/src/main/assets/` (or `jniLibs/` for
+   `.so`) — see §4's table for which repo ships what. Keep the app under a sane
+   size; the full set is ~2 GB, so prefer the per-loader subset or an on-demand
+   download. `Runner.stageAsset()` already pipes an asset through the transport
+   as base64.
+3. **Add the run button + manager picker to the UI.** `MainActivity` currently
+   detects and ranks; the tap-to-run path is a stub by design.
+4. **Build the APK** with the invocation in §6b, then test on a real device.
 5. Keep `HANDOFF.md` updated; it is the continuation point.
+
+### Open issues (fix later, as agreed)
+
+- Runner branches are stubs for ~95 of 109 loaders.
+- `TransportSelector` has no Stellar implementation yet (Shizuku, su, local-ADB only).
+- `Runner` still imports `java.io.OutputStream` unused after the `stageAsset` rewrite.
+- UI has no run/manager controls and no Compose.
+- No tests.
+- `gradle.properties` points `sdk.dir` at an absolute Windows path — fine here,
+  wrong anywhere else.
 
 ## 8. Hard rules (from upstream, do not soften)
 

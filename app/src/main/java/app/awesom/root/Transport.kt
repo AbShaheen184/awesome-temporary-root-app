@@ -1,20 +1,16 @@
 package app.awesom.root
 
 import android.content.Context
-import android.content.pm.PackageManager
-import android.os.Build
-import android.os.Process
 import rikka.shizuku.Shizuku
 import java.io.File
 import java.io.InputStream
-import java.io.OutputStream
 
 /**
  * The privileged execution channel. Every loader binary in the cloned repos is
  * exec'd as the shell user (uid 2000, `u:r:shell:s0`) through one of these.
  *
- * Order matters and matches upstream: Shizuku, then Stellar, then a live ADB
- * shell, then a real `su` if the device is already rooted.
+ * Order matches upstream usage: Shizuku, then a live `su` (device already
+ * rooted), then a local ADB shell on the device itself.
  */
 interface Transport {
     /** Short label for the UI. */
@@ -41,8 +37,8 @@ interface PrivProcess {
 class TransportSelector(private val context: Context) {
 
     private val transports: List<Transport> = listOf(
-        SuTransport(),
         ShizukuTransport(),
+        SuTransport(),
         LocalAdbTransport(),
     )
 
@@ -67,6 +63,22 @@ class TransportSelector(private val context: Context) {
         File(dir, "libksud.so").isFile
     }.getOrDefault(false)
 
+    /**
+     * Runs [script] as the shell user and returns (exitCode, stdout+stderr).
+     * Used for the read-only device facts, never for a loader run.
+     */
+    fun shell(script: String): Pair<Int, String> {
+        val t = pick() ?: return -1 to "no transport"
+        val p = t.start(
+            listOf("/system/bin/sh", "-c", script),
+            listOf("PATH=/system/bin:/system/xbin:/data/adb/ksu/bin", "HOME=/"), "/"
+        ) ?: return -1 to "transport refused"
+        val out = runCatching { p.stdout.bufferedReader().readText() }.getOrDefault("")
+        val err = runCatching { p.stderr.bufferedReader().readText() }.getOrDefault("")
+        val rc = p.waitFor()
+        return rc to (out + err)
+    }
+
     companion object {
         /** KernelSU-family packages, most common first. */
         val MANAGER_PACKAGES = listOf(
@@ -78,9 +90,30 @@ class TransportSelector(private val context: Context) {
             "me.yuki.fina",
         )
 
-        /** Runs as uid 0 only if a root daemon already exists. */
+        /**
+         * Shizuku: the shell-uid process API. `newProcess` returns an
+         * `IRemoteProcess` whose streams are ParcelFileDescriptors.
+         */
+        class ShizukuTransport : Transport {
+            override val label = "Shizuku"
+
+            override fun available(): Boolean = runCatching {
+                Shizuku.pingBinder() && Shizuku.getUid() == android.os.Process.SHELL_UID
+            }.getOrDefault(false)
+
+            override fun start(cmd: List<String>, env: List<String>, dir: String): PrivProcess? =
+                runCatching {
+                    val binder = Shizuku.getBinder() ?: return null
+                    val svc = moe.shizuku.server.IShizukuService.Stub.asInterface(binder) ?: return null
+                    val p = svc.newProcess(cmd.toTypedArray(), env.toTypedArray(), dir) ?: return null
+                    ShizukuProcess(p)
+                }.getOrNull()
+        }
+
+        /** uid 0 through an already-running root daemon. */
         class SuTransport : Transport {
             override val label = "su"
+
             override fun available(): Boolean = runCatching {
                 val p = ProcessBuilder("/system/bin/su", "-c", "id").start()
                 val out = p.inputStream.bufferedReader().readText()
@@ -89,44 +122,29 @@ class TransportSelector(private val context: Context) {
 
             override fun start(cmd: List<String>, env: List<String>, dir: String): PrivProcess? =
                 runCatching {
-                    val pb = ProcessBuilder("/system/bin/su", "-c", cmd.joinToString(" ").replace("\"", "\\\""))
-                    pb.directory(File(dir))
-                    pb.environment().putAll(env.associate { it.substringBefore('=') to it.substringAfter('=') })
+                    val script = "cd ${dir.shq()} && ${env.joinToString(" ")} ${cmd.joinToString(" ") { it.shq() }}"
+                    val pb = ProcessBuilder("/system/bin/su", "-c", script)
                     pb.redirectErrorStream(true)
                     SbProcess(pb.start())
                 }.getOrNull()
         }
 
-        class ShizukuTransport : Transport {
-            override val label = "Shizuku"
-            override fun available(): Boolean = runCatching {
-                Shizuku.pingBinder() && Shizuku.getUid() == Process.SHELL_UID
-            }.getOrDefault(false)
-
-            override fun start(cmd: List<String>, env: List<String>, dir: String): PrivProcess? =
-                runCatching {
-                    val binder = Shizuku.getBinder() ?: return null
-                    val svc = rikka.shizuku.ShizukuServiceInterface.asInterface(binder) ?: return null
-                    val p = svc.newProcess(cmd.toTypedArray(), env.toTypedArray(), dir)
-                    ShizukuProcess(p)
-                }.getOrNull()
-        }
-
         /**
          * A local adb daemon on the device itself (the TimerRoot auto-root path
-         * uses `adb` over localhost). Only usable when it answers.
+         * uses `adb` over localhost). Only usable when port 5555 answers.
          */
         class LocalAdbTransport : Transport {
             override val label = "Local ADB"
+
             override fun available(): Boolean = runCatching {
-                val p = ProcessBuilder("/system/bin/sh", "-c", "echo >/dev/tcp/127.0.0.1/5555 && echo up")
+                val p = ProcessBuilder("/system/bin/sh", "-c", "echo > /dev/tcp/127.0.0.1/5555")
                     .redirectErrorStream(true).start()
-                p.inputStream.bufferedReader().readText().contains("up") && p.waitFor() == 0
+                p.waitFor() == 0
             }.getOrDefault(false)
 
             override fun start(cmd: List<String>, env: List<String>, dir: String): PrivProcess? =
                 runCatching {
-                    val pb = ProcessBuilder("/system/bin/sh", "-c", cmd.joinToString(" "))
+                    val pb = ProcessBuilder("/system/bin/sh", "-c", cmd.joinToString(" ") { it.shq() })
                     pb.directory(File(dir))
                     pb.redirectErrorStream(true)
                     SbProcess(pb.start())
@@ -137,18 +155,23 @@ class TransportSelector(private val context: Context) {
             override val stdout: InputStream get() = p.inputStream
             override val stderr: InputStream get() = p.errorStream
             override fun waitFor(): Int = runCatching { p.waitFor() }.getOrDefault(-1)
-            override fun destroy() = runCatching { p.destroy() }
+            override fun destroy() { runCatching { p.destroy() } }
         }
 
-        private class ShizukuProcess(
-            private val p: rikka.shizuku.ShizukuProcess,
-        ) : PrivProcess {
+        private class ShizukuProcess(private val p: moe.shizuku.server.IRemoteProcess) : PrivProcess {
             override val stdout: InputStream
-                get() = android.os.ParcelFileDescriptor.AutoCloseInputStream(p.inputStream)
+                get() = android.os.ParcelFileDescriptor.AutoCloseInputStream(
+                    runCatching { p.inputStream }.getOrNull() ?: android.os.ParcelFileDescriptor.fromFd(-1)
+                )
             override val stderr: InputStream
-                get() = android.os.ParcelFileDescriptor.AutoCloseInputStream(p.errorStream)
+                get() = android.os.ParcelFileDescriptor.AutoCloseInputStream(
+                    runCatching { p.errorStream }.getOrNull() ?: android.os.ParcelFileDescriptor.fromFd(-1)
+                )
             override fun waitFor(): Int = runCatching { p.waitFor() }.getOrDefault(-1)
-            override fun destroy() = runCatching { p.destroy() }
+            override fun destroy() { runCatching { p.destroy() } }
         }
+
+        /** Single-quote a token for /system/bin/sh. */
+        private fun String.shq(): String = "'" + replace("'", "'\\''") + "'"
     }
 }

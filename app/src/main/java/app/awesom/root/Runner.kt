@@ -134,11 +134,10 @@ class Runner(private val context: Context) {
         managerPkg: String, kmi: String, onLine: (LogLine) -> Unit,
     ): RunResult {
         val asset = target.runner ?: return RunResult.Failure(-1, "no exploit asset in index")
-        val staged = stageAsset(transport, asset, "rmp-${asset.substringAfterLast('/')}") ?: run {
-            // asset may not be bundled; try the native lib dir first
-            val n = File(context.applicationInfo.nativeLibraryDir, asset.substringAfterLast('/'))
-            if (n.isFile) n.absolutePath else return RunResult.Failure(-1, "missing $asset")
-        }
+        val staged = stageAsset(transport, asset, "rmp-" + asset.substringAfterLast('/'))
+            ?: File(context.applicationInfo.nativeLibraryDir, asset.substringAfterLast('/'))
+                .takeIf { it.isFile }?.absolutePath
+            ?: return RunResult.Failure(-1, "missing $asset")
         val env = listOf(
             "PATH=/system/bin:/system/xbin:/data/adb/ksu/bin", "HOME=/", "RMY_KMI=$kmi",
         )
@@ -191,21 +190,6 @@ class Runner(private val context: Context) {
     )
 
     // ------------------------------------------------------------------ plumbing
-
-    private fun stageAsset(transport: Transport, assetName: String, destName: String): String? {
-        val bytes = runCatching { context.assets.open(assetName).use { it.readBytes() } }.getOrNull()
-            ?: return null
-        val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-        val tmp = "$workRoot/$destName.stage"
-        val sh = "mkdir -p $workRoot && echo $b64 | base64 -d > $tmp && chmod 755 $tmp && mv -f $tmp $workRoot/$destName"
-        val proc = transport.start(
-            listOf("/system/bin/sh", "-c", sh),
-            listOf("PATH=/system/bin:/system/xbin", "HOME=/"), "/"
-        ) ?: return null
-        proc.stdout.bufferedReader().readText()
-        proc.waitFor()
-        return if (File(workRoot, destName).exists()) "$workRoot/$destName" else null
-    }
 
     private fun exec(
         bin: String,
