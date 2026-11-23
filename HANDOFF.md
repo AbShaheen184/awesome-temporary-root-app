@@ -213,6 +213,48 @@ The process API is `moe.shizuku.server.IShizukuService.Stub.asInterface(binder).
 returning `moe.shizuku.server.IRemoteProcess` (`getInputStream`/`getErrorStream`/`getOutputStream` → `ParcelFileDescriptor`,
 `waitFor()` → int, `destroy()`). There is **no** `rikka.shizuku.ShizukuProcess` or `ShizukuServiceInterface`.
 
+## 6c. GUI + verified on-device behaviour (2026-11-23)
+
+The main screen is `ui/MainScreen.kt` (plain Views, dark card theme, whole page in a
+ScrollView). `MainActivity` hosts it and owns detection + run + grant flows.
+
+**Verified live on a vivo V2408A (iQOO 13), Android 17, SPL 2026-10-01:**
+
+```
+kernel  6.6.127-android15-8-gd489d4ad2a70-abogki567717946-4k
+kmi     android15-6.6          page 4096      selinux Enforcing
+build   PD2408C_A_17.2.11.8.W10   fingerprint vivo/PD2408/PD2408:17/CP2A.260605.016_V0101L22/...
+candidates → exactly one:  Shark  (kernel-release, CVE-2026-98260)  [best match]
+transport  Shizuku (uid 2000)   manager  me.weishu.kernelsu
+```
+
+**Shizuku grant — the gotcha that cost time.** `Shizuku.checkSelfPermission()` returns
+`PERMISSION_DENIED (0)` even when the service fully accepts this client. The reliable
+test is the binder uid and a real `newProcess` probe:
+
+```
+pingBinder=true  getUid=2000  checkSelfPermission=0(DENIED)  newProcess=ok
+```
+
+So the app probes `newProcess` rather than trusting the flag, and the button reads
+`SHIZUKU OK` when the binder is live. `GRANT SHIZUKU` / the proactive `ensureShizukuGrant()`
+call `Shizuku.requestPermission(1001)` when the probe fails.
+
+**Other fixes this round:**
+
+- `resources.getIdentifier(...)` silently returns 0 for these resources → every view was
+  transparent. All colours/drawables now go through `R.color.*` / `R.drawable.*`.
+- `DeviceProbe` fell back to a local `uname -r` exec when the transport read came back
+  empty (that was why the kernel line was blank at first).
+- `kmiFor()` produced `android15-6.6.127`; upstream profiles use `android15-6.6`
+  (`ksu_kmi = "android15-6.6"` for `6.6.118-android15-8-g…`). Truncates to major.minor.
+- `candidates()` (loose, page-size-only hits scored 25) → `exactCandidates()`: exact
+  kernel-release or exact model only. Non-matching loaders are no longer offered.
+
+**Repository:** `https://github.com/AbShaheen184/awesome-temporary-root-app` (remote
+`origin`, branch `master`, HEAD `e75eaa9`). Auth is the Windows git credential store —
+no token in env, `git push` works directly.
+
 ## 7. Next steps (pick up here)
 
 1. **Finish wiring the runner contracts.** `Runner.run()` currently has real
